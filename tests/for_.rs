@@ -13,7 +13,7 @@ fn probabilistic_out_of_ordering() {
     static ORDER: AtomicUsize = ATOMIC_USIZE_INIT;
     ORDER.store(0, Ordering::SeqCst);
 
-    simple_parallel::for_(index.iter_mut(), |x| {
+    simple_parallel::for_(&mut index, |x| {
         *x = ORDER.fetch_add(1, Ordering::SeqCst);
     });
 
