@@ -5,7 +5,8 @@ use std::thread::Thread;
 /// thread.
 ///
 /// If `f` panics, so does `for_`. If this occurs, the number of
-/// elements of `iter` that have for executed is unspecified.
+/// elements of `iter` that have had `f` called on them is
+/// unspecified.
 pub fn for_<I: Iterator, F>(iter: I, ref f: F)
     where I::Item: Send, F: Fn(I::Item) + Sync
 {
