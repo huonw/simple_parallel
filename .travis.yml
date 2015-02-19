@@ -1,0 +1,8 @@
+language: rust
+sudo: false
+script:
+- cargo build --verbose && cargo test --verbose && cargo doc --verbose
+after_success:
+- test "$TRAVIS_PULL_REQUEST" == false && test "$TRAVIS_BRANCH" == "master" && bash deploy-docs.sh
+env:
+  global:
