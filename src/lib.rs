@@ -23,3 +23,20 @@ pub fn for_<I: IntoIterator, F>(iter: I, ref f: F)
         })
     }).collect();
 }
+
+/// Execute `f` on both `x` and `y`, in parallel, returning the
+/// result.
+///
+/// This is the same (including panic semantics) as `(f(x), f(y))`, up
+/// to ordering. It is designed to be used for divide-and-conquer
+/// algorithms.
+pub fn both<T, U, F>(x: T, y: T, ref f: F) -> (U, U)
+    where T: Send,
+          U: Send,
+          F: Sync + Fn(T) -> U
+{
+    let guard = thread::scoped(move || f(y));
+    let a = f(x);
+    let b = guard.join();
+    (a, b)
+}
