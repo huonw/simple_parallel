@@ -3,3 +3,15 @@
 name = "simple_parallel"
 version = "0.0.1"
 authors = ["Huon Wilson <dbau.pp@gmail.com>"]
+
+homepage = "https://github.com/huonw/simple_parallel"
+repository = "https://github.com/huonw/simple_parallel"
+documentation = "http://huonw.github.io/simple_parallel/simple_parallel/"
+license = "MIT/Apache-2.0"
+keywords = ["data-parallel", "parallel"]
+readme = "README.md"
+
+description = """
+Straight-forward functions and types for basic data parallel
+operations.
+"""
