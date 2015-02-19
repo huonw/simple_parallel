@@ -1,5 +1,11 @@
-#![feature(core, std_misc)]
-use std::thread::Thread;
+#![feature(unsafe_destructor)]
+#![feature(core)]
+
+use std::thread;
+
+mod maps;
+
+pub use maps::{unordered_map, UnorderedParMap, map, ParMap};
 
 /// Execute `f` on each element of `iter`, in their own `scoped`
 /// thread.
@@ -11,7 +17,7 @@ pub fn for_<I: Iterator, F>(iter: I, ref f: F)
     where I::Item: Send, F: Fn(I::Item) + Sync
 {
     let _guards: Vec<_> = iter.map(|elem| {
-        Thread::scoped(move || {
+        thread::scoped(move || {
             f(elem)
         })
     }).collect();

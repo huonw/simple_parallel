@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicUsize, ATOMIC_USIZE_INIT, Ordering};
 fn probabilistic_out_of_ordering() {
     // with this many elements, its (hopefully) likely that the
     // threads won't execute sequentially.
-    const N: usize = 100;
+    const N: usize = 1000;
 
     let mut index = (0..N).map(|_| 0).collect::<Vec<_>>();
 
