@@ -15,3 +15,7 @@ description = """
 Straight-forward functions and types for basic data parallel
 operations.
 """
+
+[dev-dependencies]
+strided = "*"
+num = "*"
