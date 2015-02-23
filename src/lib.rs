@@ -137,14 +137,20 @@
 //! Fourier transform implementation (it really works, and the
 //! parallelism does buy something... when tuned).
 #![feature(unsafe_destructor)]
-#![feature(core)]
+#![feature(std_misc)]
 
 use std::thread;
 use std::iter::IntoIterator;
 
 mod maps;
 
+mod pool;
+
 pub use maps::{unordered_map, UnorderedParMap, map, ParMap};
+
+pub use pool::UnorderedParMap as poolUnorderedParMap;
+
+pub use pool::Pool;
 
 /// Execute `f` on each element of `iter`, in their own `scoped`
 /// thread.
