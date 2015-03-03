@@ -151,69 +151,6 @@ impl Pool {
         }
     }
 
-    /// Run a job on the thread pool.
-    ///
-    /// `gen_fn` is called `self.n_threads` times to create the
-    /// functions to execute on the worker threads. Each of these is
-    /// immediately called exactly once on a worker thread (that is,
-    /// they are semantically `FnOnce`), and `main_fn` is also called,
-    /// on the supervisor thread. It is expected that the workers and
-    /// `main_fn` will manage any internal coordination required to
-    /// distribute chunks of work.
-    ///
-    /// The job must take pains to ensure `main_fn` doesn't quit
-    /// before the workers do.
-    pub unsafe fn execute<'pool, 'f, A, GenFn, WorkerFn, MainFn>(
-        &'pool mut self, data: A, gen_fn: GenFn, main_fn: MainFn) -> JobHandle<'pool, 'f>
-
-        where A: 'f + Send,
-              GenFn: 'f + FnMut(&mut A) -> WorkerFn + Send,
-              WorkerFn: 'f + FnMut(WorkerId) + Send,
-              MainFn: 'f + FnOnce(A) + Send,
-    {
-        self.execute_nonunsafe(data, gen_fn, main_fn)
-    }
-
-    // separate function to ensure we get `unsafe` checking inside this one
-    fn execute_nonunsafe<'pool, 'f, A, GenFn, WorkerFn, MainFn>(
-        &'pool mut self, mut data: A,
-        mut gen_fn: GenFn, main_fn: MainFn) -> JobHandle<'pool, 'f>
-
-        where A: 'f + Send,
-              GenFn: 'f + FnMut(&mut A) -> WorkerFn + Send,
-              WorkerFn: 'f + FnMut(WorkerId) + Send,
-              MainFn: 'f + FnOnce(A) + Send,
-    {
-        let n_threads = self.n_threads;
-        // transmutes scary? only a little: the returned `JobHandle`
-        // ensures safety by connecting this job to the outside stack
-        // frame.
-        let func: JobInner<'f> = Box::new(move |workers: &[mpsc::Sender<Work>]| {
-            assert_eq!(workers.len(), n_threads);
-            let mut worker_fns: Vec<_> = (0..n_threads).map(|_| gen_fn(&mut data)).collect();
-
-            for (func, worker) in worker_fns.iter_mut().zip(workers.iter()) {
-                let func: WorkInner = func;
-                let func: WorkInner<'static> = unsafe {
-                    mem::transmute(func)
-                };
-                worker.send(Work { func: func }).unwrap();
-            }
-
-            main_fn(data)
-        });
-        let func: JobInner<'static> = unsafe {
-            mem::transmute(func)
-        };
-        self.job_queue.send(Some(Job { func: func })).unwrap();
-
-        JobHandle {
-            pool: self,
-            wait: true,
-            _funcs: marker::PhantomData,
-        }
-    }
-
     /// Execute `f` on each element of `iter`.
     ///
     /// This panics if `f` panics, although the precise time and
@@ -368,6 +305,72 @@ impl Pool {
             unordered: self.unordered_map(iter, f),
             looking_for: 0,
             queue: BinaryHeap::new(),
+        }
+    }
+}
+
+/// Low-level/internal functionality.
+impl Pool {
+    /// Run a job on the thread pool.
+    ///
+    /// `gen_fn` is called `self.n_threads` times to create the
+    /// functions to execute on the worker threads. Each of these is
+    /// immediately called exactly once on a worker thread (that is,
+    /// they are semantically `FnOnce`), and `main_fn` is also called,
+    /// on the supervisor thread. It is expected that the workers and
+    /// `main_fn` will manage any internal coordination required to
+    /// distribute chunks of work.
+    ///
+    /// The job must take pains to ensure `main_fn` doesn't quit
+    /// before the workers do.
+    pub unsafe fn execute<'pool, 'f, A, GenFn, WorkerFn, MainFn>(
+        &'pool mut self, data: A, gen_fn: GenFn, main_fn: MainFn) -> JobHandle<'pool, 'f>
+
+        where A: 'f + Send,
+              GenFn: 'f + FnMut(&mut A) -> WorkerFn + Send,
+              WorkerFn: 'f + FnMut(WorkerId) + Send,
+              MainFn: 'f + FnOnce(A) + Send,
+    {
+        self.execute_nonunsafe(data, gen_fn, main_fn)
+    }
+
+    // separate function to ensure we get `unsafe` checking inside this one
+    fn execute_nonunsafe<'pool, 'f, A, GenFn, WorkerFn, MainFn>(
+        &'pool mut self, mut data: A,
+        mut gen_fn: GenFn, main_fn: MainFn) -> JobHandle<'pool, 'f>
+
+        where A: 'f + Send,
+              GenFn: 'f + FnMut(&mut A) -> WorkerFn + Send,
+              WorkerFn: 'f + FnMut(WorkerId) + Send,
+              MainFn: 'f + FnOnce(A) + Send,
+    {
+        let n_threads = self.n_threads;
+        // transmutes scary? only a little: the returned `JobHandle`
+        // ensures safety by connecting this job to the outside stack
+        // frame.
+        let func: JobInner<'f> = Box::new(move |workers: &[mpsc::Sender<Work>]| {
+            assert_eq!(workers.len(), n_threads);
+            let mut worker_fns: Vec<_> = (0..n_threads).map(|_| gen_fn(&mut data)).collect();
+
+            for (func, worker) in worker_fns.iter_mut().zip(workers.iter()) {
+                let func: WorkInner = func;
+                let func: WorkInner<'static> = unsafe {
+                    mem::transmute(func)
+                };
+                worker.send(Work { func: func }).unwrap();
+            }
+
+            main_fn(data)
+        });
+        let func: JobInner<'static> = unsafe {
+            mem::transmute(func)
+        };
+        self.job_queue.send(Some(Job { func: func })).unwrap();
+
+        JobHandle {
+            pool: self,
+            wait: true,
+            _funcs: marker::PhantomData,
         }
     }
 }
