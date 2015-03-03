@@ -13,21 +13,62 @@ struct Job {
 /// A thread pool.
 ///
 /// This pool allows one to spawn several threads in one go, and then
-/// execute any number of jobs on those threads, without having to pay
-/// the thread spawning cost, or risk exhausting system resources.
-///
-/// The pool attempts to expose an API that is a generalised version
-/// of `std::thread::scoped`: at the lowest-level a submitted job
-/// returns a handle that ensures that job is finished before any data
-/// the job might reference is invalidated (i.e. manages the
-/// lifetimes). Higher-level functions will usually wrap or otherwise
-/// hide the handle. The current implementation only exposes "batch"
-/// jobs like `for_` and `map`, which take control of the whole pool,
-/// there is no way to incrementally submit jobs.
+/// execute any number of "short-lifetime" jobs on those threads,
+/// without having to pay the thread spawning cost, or risk exhausting
+/// system resources.
 ///
 /// The pool currently consists of some number of worker threads
 /// (dynamic, chosen at creation time) along with a single supervisor
-/// thread.
+/// thread. The synchronisation overhead is currently very large.
+///
+/// # "Short-lifetime"?
+///
+/// Jobs submitted to this pool can have any lifetime at all, that is,
+/// the closures passed in (and elements of iterators used, etc.) can
+/// have borrows pointing into arbitrary stack frames, even stack
+/// frames that don't outlive the pool itself. This differs to
+/// [`thread_pool::ScopedPool`](http://doc.rust-lang.org/threadpool/threadpool/struct.ScopedPool.html),
+/// where the jobs must outlive the pool.
+///
+/// This extra flexibility is achieved with careful unsafe code, by
+/// exposing an API that is a generalised version of
+/// `std::thread::scoped`: at the lowest-level a submitted job returns
+/// a `JobHandle` token that ensures that job is finished before any
+/// data the job might reference is invalidated (i.e. manages the
+/// lifetimes). Higher-level functions will usually wrap or otherwise
+/// hide the handle.
+///
+/// However, this comes at a cost: for easy of implementation `Pool`
+/// currently only exposes "batch" jobs like `for_` and `map` and
+/// these jobs take control of the whole pool. That is, one cannot
+/// easily incrementally submit arbitrary closures to execute on this
+/// thread pool, which is functionality that `threadpool::ScopedPool`
+/// offers.
+///
+/// # Example
+///
+/// ```rust
+/// use simple_parallel::Pool;
+///
+/// // a function that takes some arbitrary pool and uses the pool to
+/// // manipulate data in its own stack frame.
+/// fn do_work(pool: &mut Pool) {
+///     let mut v = [0; 8];
+///     // set each element, in parallel
+///     pool.for_(&mut v, |element| *element = 3);
+///
+///     let w = [2, 0, 1, 5, 0, 3, 0, 3];
+///
+///     // add the two arrays, in parallel
+///     let f = |(x, y): (&i32, &i32)| *x + *y;
+///     let z: Vec<_> = pool.map(v.iter().zip(w.iter()), &f).collect();
+///
+///     assert_eq!(z, &[5, 3, 4, 8, 3, 6, 3, 6]);
+/// }
+///
+/// let mut pool = Pool::new(4);
+/// do_work(&mut pool);
+/// ```
 pub struct Pool {
     job_queue: mpsc::Sender<Option<Job>>,
     job_finished: mpsc::Receiver<Result<(), ()>>,
@@ -156,6 +197,21 @@ impl Pool {
     /// This panics if `f` panics, although the precise time and
     /// number of elements consumed after the element that panics is
     /// not specified.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use simple_parallel::Pool;
+    ///
+    /// let mut pool = Pool::new(4);
+    ///
+    /// let mut v = [0; 8];
+    ///
+    /// // set each element, in parallel
+    /// pool.for_(&mut v, |element| *element = 3);
+    ///
+    /// assert_eq!(v, [3; 8]);
+    /// ```
     pub fn for_<Iter: IntoIterator, F>(&mut self, iter: Iter, ref f: F)
         where Iter::Item: Send,
               Iter: Send,
@@ -217,6 +273,25 @@ impl Pool {
     /// This behaves like `map`, but does not make efforts to ensure
     /// that the elements are returned in the order of `iter`, hence
     /// this is cheaper.
+    ///
+    /// The iterator yields `(uint, T)` tuples, where the `uint` is
+    /// the index of the element in the original iterator.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use simple_parallel::Pool;
+    ///
+    /// let mut pool = Pool::new(4);
+    ///
+    /// // adjust each element in parallel, and iterate over them as
+    /// // they are generated (or as close to that as possible)
+    /// let f = |i| i + 10;
+    /// for (index, output) in pool.unordered_map(0..8, &f) {
+    ///     // each element is exactly 10 more than its original index
+    ///     assert_eq!(output, index + 10);
+    /// }
+    /// ```
     pub fn unordered_map<'pool, 'a, I: IntoIterator, F, T>(&'pool mut self, iter: I, f: &'a F)
         -> UnorderedParMap<'pool, 'a, T>
         where I: 'a + Send,
@@ -294,6 +369,22 @@ impl Pool {
     /// This is a drop-in replacement for `iter.map(f)`, that runs in
     /// parallel, and consumes `iter` as the pool's threads complete
     /// their previous tasks.
+    ///
+    /// See `unordered_map` if the output order is unimportant.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use simple_parallel::Pool;
+    ///
+    /// let mut pool = Pool::new(4);
+    ///
+    /// // create a vector by adjusting 0..8, in parallel
+    /// let f = |i| i + 10;
+    /// let elements: Vec<_> = pool.map(0..8, &f).collect();
+    ///
+    /// assert_eq!(elements, &[10, 11, 12, 13, 14, 15, 16, 17]);
+    /// ```
     pub fn map<'pool, 'a, I: IntoIterator, F, T>(&'pool mut self, iter: I, f: &'a F)
         -> ParMap<'pool, 'a, T>
         where I: 'a + Send,
