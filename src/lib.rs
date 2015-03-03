@@ -8,11 +8,11 @@
 //! for some fairly fancy things to be written with a guarantee of
 //! safety, all without a garbage collector.
 //!
-//! The only dependency is `std` and there is no `unsafe` code at all,
-//! all the parallelism is built directly from the functionality
-//! provided by `std::thread` and `std::sync` and leverages their
-//! correctness to automatically ensure correctness (at the memory
-//! safety level).
+//! The only dependency is `std` and the basic fucntionality has
+//! `unsafe` code at all (the thread pool does use unsafe), all the
+//! parallelism is built directly from the functionality provided by
+//! `std::thread` and `std::sync` and leverages their correctness to
+//! automatically ensure correctness (at the memory safety level).
 //!
 //! The core design is to simply allow for operations that could occur
 //! on a single thread to execute on many, it is not intending to
@@ -21,16 +21,22 @@
 //! sequentially, it will also take down the main thread (eventually)
 //! when run using the functions in this library.
 //!
-//! On the point of performance and robust, there's no thread pooling,
-//! and so everything essentially spawns a new thread for each
-//! element, which is definitely suboptimal for many
-//! reasons. Fortunately, not all is lost, the functionality is
-//! designed to be as generic as possible, so the iterator functions
-//! work with many many iterators, e.g. instead of executing a thread
-//! on every element of a vector individually, a user can divide that
-//! vector into disjoint sections and spread those across much fewer
-//! threads (e.g. [the `chunks`
+//! On the point of performance and robustness, the top level
+//! functions do no thread pooling and so everything essentially
+//! spawns a new thread for each element, which is definitely
+//! suboptimal for many reasons. Fortunately, not all is lost, the
+//! functionality is designed to be as generic as possible, so the
+//! iterator functions work with many many iterators, e.g. instead of
+//! executing a thread on every element of a vector individually, a
+//! user can divide that vector into disjoint sections and spread
+//! those across much fewer threads (e.g. [the `chunks`
 //! method](http://doc.rust-lang.org/nightly/std/slice/trait.SliceExt.html#tymethod.chunks)).
+//!
+//! Further, the thread pooling that does exist has a lot of
+//! synchronisation overhead, and so is actually rarely a performance
+//! improvement (although it is a robustness improvement over the
+//! top-level functions, since it limits the number of threads that
+//! will be spawned).
 //!
 //! Either way, **this is not recommended for general use**. At the
 //! moment, it is too easy to get resource exhaustion, and crash the

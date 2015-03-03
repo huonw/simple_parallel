@@ -10,6 +10,24 @@ struct Job {
     func: JobInner<'static>,
 }
 
+/// A thread pool.
+///
+/// This pool allows one to spawn several threads in one go, and then
+/// execute any number of jobs on those threads, without having to pay
+/// the thread spawning cost, or risk exhausting system resources.
+///
+/// The pool attempts to expose an API that is a generalised version
+/// of `std::thread::scoped`: at the lowest-level a submitted job
+/// returns a handle that ensures that job is finished before any data
+/// the job might reference is invalidated (i.e. manages the
+/// lifetimes). Higher-level functions will usually wrap or otherwise
+/// hide the handle. The current implementation only exposes "batch"
+/// jobs like `for_` and `map`, which take control of the whole pool,
+/// there is no way to incrementally submit jobs.
+///
+/// The pool currently consists of some number of worker threads
+/// (dynamic, chosen at creation time) along with a single supervisor
+/// thread.
 pub struct Pool {
     job_queue: mpsc::Sender<Option<Job>>,
     job_finished: mpsc::Receiver<Result<(), ()>>,
@@ -23,15 +41,27 @@ struct Work {
     func: WorkInner<'static>
 }
 
+/// A token representing a job submitted to the thread pool.
+///
+/// This ensures that a job is finished before borrowed resources in
+/// the job (and the pool itself) are invalidated.
+///
+/// If the job panics, this handle will ensure the main thread also
+/// panics (either via `wait` or in the destructor).
 pub struct JobHandle<'pool, 'f> {
     pool: &'pool mut Pool,
     wait: bool,
     _funcs: marker::PhantomData<&'f ()>,
 }
 impl<'pool, 'f> JobHandle<'pool, 'f> {
-    pub fn wait(mut self) -> Result<(), ()> {
+    /// Block until the job is finished.
+    ///
+    /// # Panics
+    ///
+    /// This will panic if the job panicked.
+    pub fn wait(mut self) {
         self.wait = false;
-        self.pool.job_finished.recv().unwrap()
+        self.pool.job_finished.recv().unwrap().unwrap();
     }
 }
 #[unsafe_destructor]
@@ -70,6 +100,7 @@ impl<'a> Drop for PanicCanary<'a> {
     }
 }
 impl Pool {
+    /// Create a new thread pool with `n_threads` worker threads.
     pub fn new(n_threads: usize) -> Pool {
         let (tx, rx) = mpsc::channel::<Option<Job>>();
         let (finished_tx, finished_rx) = mpsc::channel();
@@ -120,7 +151,18 @@ impl Pool {
         }
     }
 
-    /// Must take pains to ensure `MainFn` doesn't quit before the `WorkerFn`s do.
+    /// Run a job on the thread pool.
+    ///
+    /// `gen_fn` is called `self.n_threads` times to create the
+    /// functions to execute on the worker threads. Each of these is
+    /// immediately called exactly once on a worker thread (that is,
+    /// they are semantically `FnOnce`), and `main_fn` is also called,
+    /// on the supervisor thread. It is expected that the workers and
+    /// `main_fn` will manage any internal coordination required to
+    /// distribute chunks of work.
+    ///
+    /// The job must take pains to ensure `main_fn` doesn't quit
+    /// before the workers do.
     pub unsafe fn execute<'pool, 'f, A, GenFn, WorkerFn, MainFn>(
         &'pool mut self, data: A, gen_fn: GenFn, main_fn: MainFn) -> JobHandle<'pool, 'f>
 
@@ -172,6 +214,11 @@ impl Pool {
         }
     }
 
+    /// Execute `f` on each element of `iter`.
+    ///
+    /// This panics if `f` panics, although the precise time and
+    /// number of elements consumed after the element that panics is
+    /// not specified.
     pub fn for_<Iter: IntoIterator, F>(&mut self, iter: Iter, ref f: F)
         where Iter::Item: Send,
               Iter: Send,
@@ -223,10 +270,16 @@ impl Pool {
                     }
                 });
 
-            handle.wait().unwrap()
+            handle.wait();
         }
     }
 
+    /// Execute `f` on each element in `iter` in parallel across the
+    /// pool's threads, with unspecified yield order.
+    ///
+    /// This behaves like `map`, but does not make efforts to ensure
+    /// that the elements are returned in the order of `iter`, hence
+    /// this is cheaper.
     pub fn unordered_map<'pool, 'a, I: IntoIterator, F, T>(&'pool mut self, iter: I, f: &'a F)
         -> UnorderedParMap<'pool, 'a, T>
         where I: 'a + Send,
@@ -297,6 +350,13 @@ impl Pool {
         }
     }
 
+    /// Execute `f` on `iter` in parallel across the pool's threads,
+    /// returning an iterator that yields the results in the order of
+    /// the elements of `iter` to which they correspond.
+    ///
+    /// This is a drop-in replacement for `iter.map(f)`, that runs in
+    /// parallel, and consumes `iter` as the pool's threads complete
+    /// their previous tasks.
     pub fn map<'pool, 'a, I: IntoIterator, F, T>(&'pool mut self, iter: I, f: &'a F)
         -> ParMap<'pool, 'a, T>
         where I: 'a + Send,
@@ -332,6 +392,9 @@ impl<T> PartialEq for Packet<T> {
 }
 impl<T> Eq for Packet<T> {}
 
+/// A parallel-mapping iterator, that yields elements in the order
+/// they are computed, not the order from which they are yielded by
+/// the underlying iterator.
 pub struct UnorderedParMap<'pool, 'a, T: 'a + Send> {
     rx: mpsc::Receiver<Packet<T>>,
     _guard: JobHandle<'pool, 'a>,
@@ -350,7 +413,8 @@ impl<'pool, 'a,T: 'a + Send> Iterator for UnorderedParMap<'pool , 'a, T> {
     }
 }
 
-/// A parallel-mapping iterator.
+/// A parallel-mapping iterator, that yields elements in the order
+/// they are yielded by the underlying iterator.
 pub struct ParMap<'pool, 'a, T: 'a + Send> {
     unordered: UnorderedParMap<'pool, 'a, T>,
     looking_for: usize,
