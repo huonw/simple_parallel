@@ -150,11 +150,13 @@ use std::iter::IntoIterator;
 
 mod maps;
 
-mod pool;
+pub mod pool;
 
-pub use maps::{unordered_map, UnorderedParMap, map, ParMap};
+pub mod one_to_one {
+    pub use maps::{unordered_map, UnorderedParMap, map, ParMap};
+}
 
-pub use pool::UnorderedParMap as poolUnorderedParMap;
+pub use one_to_one::{map, unordered_map};
 
 pub use pool::Pool;
 
