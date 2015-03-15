@@ -327,7 +327,7 @@ impl Pool {
                                          Ok(Some((idx, elem))) => {
                                              let data = f(elem);
                                              let status = tx.send(Packet {
-                                                 idx: idx, data: Some(data)
+                                                 idx: idx, data: data
                                              });
                                              // the user disconnected,
                                              // so there's no point
@@ -472,7 +472,7 @@ use std::cmp::Ordering;
 struct Packet<T> {
     // this should be unique for a given instance of `*ParMap`
     idx: usize,
-    data: Option<T>,
+    data: T,
 }
 impl<T> PartialOrd for Packet<T> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> { Some(self.cmp(other)) }
@@ -498,10 +498,7 @@ impl<'pool, 'a,T: 'a + Send> Iterator for UnorderedParMap<'pool , 'a, T> {
 
     fn next(&mut self) -> Option<(usize, T)> {
         match self.rx.recv() {
-            Ok(Packet { data: Some(x), idx }) => Some((idx, x)),
-            Ok(Packet { data: None, .. }) => {
-                panic!("simple_parallel::unordered_map: closure panicked")
-            }
+            Ok(Packet { data, idx }) => Some((idx, data)),
             Err(mpsc::RecvError) => None,
         }
     }
@@ -525,10 +522,7 @@ impl<'pool, 'a, T: Send + 'a> Iterator for ParMap<'pool, 'a, T> {
 
                 let packet = self.queue.pop().unwrap();
                 self.looking_for += 1;
-                match packet.data {
-                    Some(x) => return Some(x),
-                    None => panic!("simple_parallel::map: closure panicked")
-                }
+                return Some(packet.data)
             }
             match self.unordered.rx.recv() {
                 // this could be optimised to check for `packet.idx ==
