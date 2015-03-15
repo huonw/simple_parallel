@@ -8,11 +8,12 @@
 //! for some fairly fancy things to be written with a guarantee of
 //! safety, all without a garbage collector.
 //!
-//! The only dependency is `std` and the basic fucntionality has
-//! `unsafe` code at all (the thread pool does use unsafe), all the
-//! parallelism is built directly from the functionality provided by
-//! `std::thread` and `std::sync` and leverages their correctness to
-//! automatically ensure correctness (at the memory safety level).
+//! The only dependency is `std` and the basic functionality has no
+//! `unsafe` code at all (the thread pool does use unsafe). Other than
+//! the pool, parallelism is built directly from the functionality
+//! provided by `std::thread` and `std::sync` and leverages their
+//! correctness to automatically ensure the correctness of this
+//! library (at the memory safety level).
 //!
 //! The core design is to simply allow for operations that could occur
 //! on a single thread to execute on many, it is not intending to
@@ -42,15 +43,20 @@
 //! moment, it is too easy to get resource exhaustion, and crash the
 //! application, and generally pays a much higher cost than necessary.
 //!
-//! # Example
+//! # Examples
 //!
 //! Initialise an array, in parallel.
 //!
 //! ```rust
 //! let mut data = [0; 10];
+//! // fill the array, with one thread for each element:
 //! simple_parallel::for_(data.iter_mut().enumerate(), |(i, elem)| {
 //!     *elem = i as i32;
-//! })
+//! });
+//!
+//! // now adjust that data, with a threadpool:
+//! let mut pool = simple_parallel::Pool::new(4);
+//! pool.for_(data.iter_mut(), |elem| *elem *= 2);
 //! ```
 //!
 //! Transform each element of an ordered map in a fancy way, in
@@ -98,6 +104,31 @@
 //!
 //!     let total = Mutex::new(0.0);
 //!     simple_parallel::for_(x.chunks(elements_per_chunk), |chunk| {
+//!         // sum up this little subsection
+//!         let subsum = chunk.iter().fold(0.0, |a, b| a + *b);
+//!         *total.lock().unwrap() += subsum;
+//!     });
+//!
+//!     let answer = *total.lock().unwrap();
+//!     answer
+//! }
+//! ```
+//!
+//! Alternatively, one could use a thread pool, and assign an absolute
+//! number of elements to each subsection and let the pool manage
+//! distributing the work among threads, instead of being forced to
+//! computing the length of the subsections to limit the number of
+//! threads spawned.
+//!
+//! ```rust
+//! use std::sync::Mutex;
+//!
+//! // limit the spew of thread spawning to something sensible
+//! const ELEMS_PER_JOB: usize = 1_000;
+//!
+//! fn pooled_sum(pool: &mut simple_parallel::Pool, x: &[f64]) -> f64 {
+//!     let total = Mutex::new(0.0);
+//!     simple_parallel::for_(x.chunks(ELEMS_PER_JOB), |chunk| {
 //!         // sum up this little subsection
 //!         let subsum = chunk.iter().fold(0.0, |a, b| a + *b);
 //!         *total.lock().unwrap() += subsum;
