@@ -57,5 +57,5 @@ fn pool_map_in_order() {
     let f = |i: usize| i;
     let iter = pool.map(0..N, &f);
 
-    assert!(iter.enumerate().all(|(yield_order, true_order)| yield_order == true_order));
+    assert!(std::iter::order::eq(iter, 0..N));
 }
