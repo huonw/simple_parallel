@@ -1,3 +1,4 @@
+#![feature(core)]
 extern crate simple_parallel;
 
 #[test]
@@ -42,8 +43,27 @@ fn pool_unordered() {
     // see if there are any elements where the order they come out of
     // the original iterator is different to the order in which they
     // are yielded here.
-    assert!(iter.enumerate().any(|(yield_order, (true_order, ()))| yield_order != true_order));
+    let v: Vec<_> = iter.enumerate().collect();
+    assert_eq!(v.len(), N);
+    assert!(v.into_iter().any(|(yield_order, (true_order, ()))| yield_order != true_order));
+}
+#[test]
+fn pool_unordered2() {
+    let mut pool = simple_parallel::Pool::new(2);
 
+    // with this many elements, its (hopefully) likely that the
+    // threads won't execute sequentially.
+    const N: usize = 1000;
+
+    let f = |_: usize| {};
+    let iter = pool.unordered_map2(0..N, &f);
+
+    // see if there are any elements where the order they come out of
+    // the original iterator is different to the order in which they
+    // are yielded here.
+    let v: Vec<_> = iter.enumerate().collect();
+    assert_eq!(v.len(), N);
+    assert!(v.into_iter().any(|(yield_order, (true_order, ()))| yield_order != true_order));
 }
 
 #[test]
@@ -56,6 +76,19 @@ fn pool_map_in_order() {
 
     let f = |i: usize| i;
     let iter = pool.map(0..N, &f);
+
+    assert!(std::iter::order::eq(iter, 0..N));
+}
+#[test]
+fn pool_map2_in_order() {
+    let mut pool = simple_parallel::Pool::new(8);
+
+    // with this many elements, its (hopefully) likely that the
+    // threads won't execute sequentially.
+    const N: usize = 1000;
+
+    let f = |i: usize| i;
+    let iter = pool.map2(0..N, &f);
 
     assert!(std::iter::order::eq(iter, 0..N));
 }

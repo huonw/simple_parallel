@@ -1,7 +1,7 @@
 use std::collections::BinaryHeap;
 use std::iter::IntoIterator;
 use std::{marker, mem};
-use std::sync::{mpsc, atomic};
+use std::sync::{mpsc, atomic, Mutex, Arc};
 use std::thread;
 use std::thunk::Invoke;
 
@@ -361,6 +361,119 @@ impl Pool {
             _guard: handle,
         }
     }
+    pub fn unordered_map2<'pool, 'a, I: IntoIterator, F, T>(&'pool mut self, iter: I, f: &'a F)
+        -> UnorderedParMap<'pool, 'a, T>
+        where I: 'a + Send,
+              I::Item: Send + 'a,
+              F: 'a + Sync + Fn(I::Item) -> T,
+              T: Send + 'a
+    {
+        let nthreads = self.n_threads;
+        let (needwork_tx, needwork_rx) = mpsc::channel();
+        let (work_tx, work_rx) = mpsc::channel();
+        struct Shared<Chan, Atom> {
+            work: Chan,
+            sent: Atom,
+            finished: Atom
+        }
+        let shared = Arc::new(Shared {
+            work: Mutex::new(work_rx),
+            sent: atomic::AtomicUsize::new(0),
+            finished: atomic::AtomicUsize::new(0)
+        });
+
+        let (tx, rx) = mpsc::channel();
+
+        const INITIAL_FACTOR: usize = 4;
+        const BUFFER_FACTOR: usize = INITIAL_FACTOR / 2;
+
+        let handle = unsafe {
+            self.execute((needwork_tx, shared),
+                         move |&mut (ref needwork_tx, ref shared)| {
+                             let mut needwork_tx = Some(needwork_tx.clone());
+                             let tx = tx.clone();
+                             let shared = shared.clone();
+                             move |_id| {
+                                 let needwork = needwork_tx.take().unwrap();
+                                 loop {
+                                     let data =  {
+                                         let guard = shared.work.lock().unwrap();
+                                         guard.recv()
+                                     };
+                                     match data {
+                                         Ok(Some((idx, elem))) => {
+                                             let data = f(elem);
+                                             let status = tx.send(Packet {
+                                                 idx: idx, data: data
+                                             });
+                                             // the user disconnected,
+                                             // so there's no point
+                                             // computing more.
+                                             if status.is_err() {
+                                                 let _ = needwork.send(true);
+                                                 break
+                                             }
+                                         }
+                                         Ok(None) | Err(_) => {
+                                             break
+                                         }
+                                     };
+                                     let old =
+                                         shared.finished.fetch_add(1, atomic::Ordering::SeqCst);
+                                     let sent = shared.sent.load(atomic::Ordering::SeqCst);
+
+                                     if old + BUFFER_FACTOR * nthreads == sent {
+                                         if needwork.send(false).is_err() {
+                                             break
+                                         }
+                                     }
+                                 }
+                             }
+                         },
+                         move |(needwork_tx, shared)| {
+                             let mut iter = iter.into_iter().fuse().enumerate();
+                             drop(needwork_tx);
+
+                             let mut send_data = |n: usize| {
+                                 shared.sent.fetch_add(n, atomic::Ordering::SeqCst);
+
+                                 for _ in 0..n {
+                                     // TODO: maybe this could instead send
+                                     // several elements at a time, to
+                                     // reduce the number of
+                                     // allocations/atomic operations
+                                     // performed.
+                                     //
+                                     // Downside: work will be
+                                     // distributed chunkier.
+                                     let _ = work_tx.send(iter.next());
+                                 }
+                             };
+
+
+                             send_data(INITIAL_FACTOR * nthreads);
+
+                             loop {
+                                 match needwork_rx.recv() {
+                                     // closed, done!
+                                     Ok(true) | Err(_) => break,
+                                     Ok(false) => {
+                                         // ignore return, because we
+                                         // need to wait until the
+                                         // workers have exited (i.e,
+                                         // the Err arm above)
+                                         let _ = send_data(BUFFER_FACTOR * nthreads);
+                                     }
+                                 }
+                             }
+                         })
+        };
+
+        UnorderedParMap {
+            rx: rx,
+            _guard: handle,
+        }
+    }
 
     /// Execute `f` on `iter` in parallel across the pool's threads,
     /// returning an iterator that yields the results in the order of
@@ -394,6 +507,20 @@ impl Pool {
     {
         ParMap {
             unordered: self.unordered_map(iter, f),
+            looking_for: 0,
+            queue: BinaryHeap::new(),
+        }
+    }
+
+    pub fn map2<'pool, 'a, I: IntoIterator, F, T>(&'pool mut self, iter: I, f: &'a F)
+        -> ParMap<'pool, 'a, T>
+        where I: 'a + Send,
+              I::Item: Send + 'a,
+              F: 'a + Sync + Fn(I::Item) -> T,
+              T: Send + 'a
+    {
+        ParMap {
+            unordered: self.unordered_map2(iter, f),
             looking_for: 0,
             queue: BinaryHeap::new(),
         }
