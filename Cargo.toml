@@ -1,7 +1,7 @@
 [package]
 
 name = "simple_parallel"
-version = "0.0.1"
+version = "0.1.0"
 authors = ["Huon Wilson <dbau.pp@gmail.com>"]
 
 homepage = "https://github.com/huonw/simple_parallel"
@@ -13,7 +13,7 @@ readme = "README.md"
 
 description = """
 Straight-forward functions and types for basic data parallel
-operations.
+operations, including parallel maps, for loops and thread pools.
 """
 
 [dev-dependencies]
