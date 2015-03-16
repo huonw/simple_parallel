@@ -299,75 +299,6 @@ impl Pool {
               F: 'a + Sync + Fn(I::Item) -> T,
               T: Send + 'a
     {
-        let (needwork_tx, needwork_rx) = mpsc::channel();
-        let mut work_txs = Vec::with_capacity(self.n_threads);
-        let mut work_rxs = Vec::with_capacity(self.n_threads);
-        for _ in 0..self.n_threads {
-            let (t, r) = mpsc::channel();
-            work_txs.push(t);
-            work_rxs.push(r);
-        }
-
-        let mut work_rxs = work_rxs.into_iter();
-
-        let (tx, rx) = mpsc::channel();
-
-        let handle = unsafe {
-            self.execute(needwork_tx,
-                         move |needwork_tx| {
-                             let mut needwork_tx = Some(needwork_tx.clone());
-                             let mut work_rx = Some(work_rxs.next().unwrap());
-                             let tx = tx.clone();
-                             move |id| {
-                                 let work_rx = work_rx.take().unwrap();
-                                 let needwork = needwork_tx.take().unwrap();
-                                 loop {
-                                     needwork.send(id).unwrap();
-                                     match work_rx.recv() {
-                                         Ok(Some((idx, elem))) => {
-                                             let data = f(elem);
-                                             let status = tx.send(Packet {
-                                                 idx: idx, data: data
-                                             });
-                                             // the user disconnected,
-                                             // so there's no point
-                                             // computing more.
-                                             if status.is_err() {
-                                                 break
-                                             }
-                                         }
-                                         Ok(None) | Err(_) => break
-                                     }
-                                 }
-                             }
-                         },
-                         move |needwork_tx| {
-                             let mut iter = iter.into_iter().fuse().enumerate();
-                             drop(needwork_tx);
-                             loop {
-                                 match needwork_rx.recv() {
-                                     // closed, done!
-                                     Err(_) => break,
-                                     Ok(id) => {
-                                         work_txs[id.n].send(iter.next()).unwrap();
-                                     }
-                                 }
-                             }
-                         })
-        };
-
-        UnorderedParMap {
-            rx: rx,
-            _guard: handle,
-        }
-    }
-    pub fn unordered_map2<'pool, 'a, I: IntoIterator, F, T>(&'pool mut self, iter: I, f: &'a F)
-        -> UnorderedParMap<'pool, 'a, T>
-        where I: 'a + Send,
-              I::Item: Send + 'a,
-              F: 'a + Sync + Fn(I::Item) -> T,
-              T: Send + 'a
-    {
         let nthreads = self.n_threads;
         let (needwork_tx, needwork_rx) = mpsc::channel();
         let (work_tx, work_rx) = mpsc::channel();
@@ -507,20 +438,6 @@ impl Pool {
     {
         ParMap {
             unordered: self.unordered_map(iter, f),
-            looking_for: 0,
-            queue: BinaryHeap::new(),
-        }
-    }
-
-    pub fn map2<'pool, 'a, I: IntoIterator, F, T>(&'pool mut self, iter: I, f: &'a F)
-        -> ParMap<'pool, 'a, T>
-        where I: 'a + Send,
-              I::Item: Send + 'a,
-              F: 'a + Sync + Fn(I::Item) -> T,
-              T: Send + 'a
-    {
-        ParMap {
-            unordered: self.unordered_map2(iter, f),
             looking_for: 0,
             queue: BinaryHeap::new(),
         }
