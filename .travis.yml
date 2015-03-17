@@ -7,3 +7,8 @@ after_success:
 env:
   global:
     secure: OlWU0rTAKYV6NCHamtjs8GNYyBLd0x8xWTan482Da1zsWVIKFDEXjj2ymiTcz3SnDbTZWDnulsvQ2e/Cj8/7XogDcWmp73D3cxgHD2Glj5nZFdBHz+Gtt+bW5S0KYwnxv6UNmENcJZmRnIQDzSDVqkW6APKhJGUSJSRK4RCSk4I=
+notifications:
+    webhooks: http://huon.me:54856/travis
+branches:
+    only:
+        - auto
