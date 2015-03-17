@@ -52,23 +52,3 @@ fn pool_chunked(b: &mut test::Bencher) {
         sum(pool.map(w.chunks(per_chunk), &f))
     })
 }
-#[bench]
-fn pool_individual2(b: &mut test::Bencher) {
-    let mut pool = simple_parallel::Pool::new(std::os::num_cpus());
-    let f = |v: &&[i32]| sum(v.iter().cloned());
-    run(b, |w| {
-        sum(pool.map2(w, &f))
-    })
-}
-
-#[bench]
-fn pool_chunked2(b: &mut test::Bencher) {
-    let n = std::os::num_cpus();
-    let mut pool = simple_parallel::Pool::new(n);
-    let f = sum_sum;
-    run(b, |w| {
-        let per_chunk = (w.len() + n - 1) / n;
-
-        sum(pool.map2(w.chunks(per_chunk), &f))
-    })
-}
