@@ -39,9 +39,21 @@
 //! top-level functions, since it limits the number of threads that
 //! will be spawned).
 //!
-//! Either way, **this is not recommended for general use**. At the
-//! moment, it is too easy to get resource exhaustion, and crash the
-//! application, and generally pays a much higher cost than necessary.
+//! Either way, **this is not recommended for general use**.
+//!
+//! # Usage
+//!
+//! This is [available on
+//! crates.io](https://crates.io/crates/simple_parallel). Add this to
+//! your Cargo.toml:
+//!
+//! ```toml
+//! [dependencies]
+//! simple_parallel = "0.1"
+//! ```
+//!
+//! The latest development version can be obtained [on
+//! GitHub](https://github.com/huonw/simple_parallel).
 //!
 //! # Examples
 //!
