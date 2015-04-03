@@ -1,12 +1,9 @@
-#![feature(core)]
-
 //! A parallel radix-2 decimation-in-time fast Fourier transform.
 
 extern crate strided; // https://crates.io/crates/strided
 extern crate num; // https://crates.io/crates/num
 extern crate simple_parallel;
 
-use std::num::Int;
 use std::f64;
 use num::complex::{Complex, Complex64};
 use strided::{MutStride, Stride};
@@ -64,5 +61,5 @@ fn main() {
     let mut b = [Complex::new(0., 0.); 4];
 
     fft(Stride::new(&a), MutStride::new(&mut b));
-    println!("forward:\n{:?}\n->\n{:?}", a.as_slice(), b.as_slice());
+    println!("forward:\n{:?}\n->\n{:?}", a, b);
 }

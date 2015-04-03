@@ -49,7 +49,6 @@ struct Panicker<T: Send + 'static> {
     idx: usize,
     all_ok: bool
 }
-#[unsafe_destructor]
 impl<T: Send + 'static> Drop for Panicker<T> {
     fn drop(&mut self) {
         if !self.all_ok {

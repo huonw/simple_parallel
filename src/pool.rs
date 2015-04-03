@@ -3,9 +3,9 @@ use std::iter::IntoIterator;
 use std::{marker, mem};
 use std::sync::{mpsc, atomic, Mutex, Arc};
 use std::thread;
-use std::thunk::Invoke;
+use std::boxed::FnBox;
 
-type JobInner<'b> =  Box<for<'a> Invoke<&'a [mpsc::Sender<Work>], ()> + Send + 'b>;
+type JobInner<'b> =  Box<for<'a> FnBox(&'a [mpsc::Sender<Work>]) + Send + 'b>;
 struct Job {
     func: JobInner<'static>,
 }
@@ -105,7 +105,6 @@ impl<'pool, 'f> JobHandle<'pool, 'f> {
         self.pool.job_finished.recv().unwrap().unwrap();
     }
 }
-#[unsafe_destructor]
 impl<'pool, 'f> Drop for JobHandle<'pool, 'f> {
     fn drop(&mut self) {
         if self.wait {
@@ -132,7 +131,6 @@ impl Drop for PanicHandler {
 struct PanicCanary<'a> {
     flag: &'a atomic::AtomicBool
 }
-#[unsafe_destructor]
 impl<'a> Drop for PanicCanary<'a> {
     fn drop(&mut self) {
         if thread::panicking() {
@@ -176,7 +174,7 @@ impl Pool {
             }
 
             while let Ok(Some(job)) = rx.recv() {
-                job.func.invoke(&txs);
+                (job.func).call_box((&txs,));
                 let job_panicked = panicked.load(atomic::Ordering::SeqCst);
                 let msg = if job_panicked { Err(()) } else { Ok(()) };
                 finished_tx.tx.send(msg).unwrap();
@@ -289,7 +287,7 @@ impl Pool {
     /// let f = |i| i + 10;
     /// for (index, output) in pool.unordered_map(0..8, &f) {
     ///     // each element is exactly 10 more than its original index
-    ///     assert_eq!(output, index + 10);
+    ///     assert_eq!(output, index as i32 + 10);
     /// }
     /// ```
     pub fn unordered_map<'pool, 'a, I: IntoIterator, F, T>(&'pool mut self, iter: I, f: &'a F)
