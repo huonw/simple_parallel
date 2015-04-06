@@ -74,7 +74,7 @@ pub struct Pool {
     job_finished: mpsc::Receiver<Result<(), ()>>,
     n_threads: usize,
 }
-#[derive(Copy)]
+#[derive(Copy, Clone)]
 struct WorkerId { n: usize }
 
 type WorkInner<'a> = &'a mut (FnMut(WorkerId) + Send + 'a);
