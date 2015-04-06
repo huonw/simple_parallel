@@ -140,7 +140,7 @@
 //!
 //! fn pooled_sum(pool: &mut simple_parallel::Pool, x: &[f64]) -> f64 {
 //!     let total = Mutex::new(0.0);
-//!     simple_parallel::for_(x.chunks(ELEMS_PER_JOB), |chunk| {
+//!     pool.for_(x.chunks(ELEMS_PER_JOB), |chunk| {
 //!         // sum up this little subsection
 //!         let subsum = chunk.iter().fold(0.0, |a, b| a + *b);
 //!         *total.lock().unwrap() += subsum;
