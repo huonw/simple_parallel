@@ -3,7 +3,7 @@
 //!
 //! This library provides a few building blocks for operating on data
 //! in parallel, particularly iterators. At the moment, it is not
-//! designed to be robust or eek out every last drop of performance,
+//! designed to be robust or eke out every last drop of performance,
 //! but rather explore some ways in which Rust's type system allows
 //! for some fairly fancy things to be written with a guarantee of
 //! safety, all without a garbage collector.
