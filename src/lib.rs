@@ -185,7 +185,7 @@
 //! contains more intricate example(s), such as a parallel fast
 //! Fourier transform implementation (it really works, and the
 //! parallelism does buy something... when tuned).
-#![feature(core)]
+#![feature(core, scoped)]
 
 use std::thread;
 use std::iter::IntoIterator;
