@@ -19,6 +19,7 @@ operations, including parallel maps, for loops and thread pools.
 [dev-dependencies]
 strided = "*"
 num = "*"
+num_cpus = "0.2"
 
 [features]
 unstable = []

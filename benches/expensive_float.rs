@@ -2,8 +2,6 @@
 extern crate test;
 extern crate simple_parallel;
 
-use std::num::Float;
-
 fn expensive(x: u64) -> f64 {
     (x as f64)
         .sin().exp().cos().abs().ln()

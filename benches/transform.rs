@@ -1,5 +1,6 @@
-#![feature(test, os, core)]
+#![feature(test)]
 extern crate test;
+extern crate num_cpus;
 extern crate simple_parallel;
 
 fn run<F>(b: &mut test::Bencher, mut f: F) where F: FnMut(&[&[i32]]) -> i32 {
@@ -24,7 +25,7 @@ fn naive(b: &mut test::Bencher) {
 }
 #[bench]
 fn pool_individual(b: &mut test::Bencher) {
-    let mut pool = simple_parallel::Pool::new(std::os::num_cpus());
+    let mut pool = simple_parallel::Pool::new(num_cpus::get());
     let f = |v: &&[i32]| sum(v.iter().cloned());
     run(b, |w| {
         sum(pool.map(w, &f))
@@ -33,7 +34,7 @@ fn pool_individual(b: &mut test::Bencher) {
 
 #[bench]
 fn chunked(b: &mut test::Bencher) {
-    let n = std::os::num_cpus();
+    let n = num_cpus::get();
     let f = sum_sum;
     run(b, |w| {
         let per_chunk = (w.len() + n - 1) / n;
@@ -43,7 +44,7 @@ fn chunked(b: &mut test::Bencher) {
 }
 #[bench]
 fn pool_chunked(b: &mut test::Bencher) {
-    let n = std::os::num_cpus();
+    let n = num_cpus::get();
     let mut pool = simple_parallel::Pool::new(n);
     let f = sum_sum;
     run(b, |w| {
