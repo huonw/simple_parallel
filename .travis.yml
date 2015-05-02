@@ -7,7 +7,7 @@ before_script:
 script:
   - |
       travis-cargo build &&
-      travis-cargo test &&
+      RUST_TEST_THREADS=1 travis-cargo test &&
       travis-cargo bench &&
       travis-cargo doc
 after_success:

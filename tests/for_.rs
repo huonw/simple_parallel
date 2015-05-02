@@ -2,12 +2,12 @@ extern crate simple_parallel;
 
 use std::sync::atomic::{AtomicUsize, ATOMIC_USIZE_INIT, Ordering};
 
+// with this many elements, its (hopefully) likely that the
+// threads won't execute sequentially.
+const N: usize = 10000;
+
 #[test]
 fn probabilistic_out_of_ordering() {
-    // with this many elements, its (hopefully) likely that the
-    // threads won't execute sequentially.
-    const N: usize = 1000;
-
     let mut index = (0..N).map(|_| 0).collect::<Vec<_>>();
 
     static ORDER: AtomicUsize = ATOMIC_USIZE_INIT;
@@ -23,9 +23,6 @@ fn probabilistic_out_of_ordering() {
 #[test]
 fn pool() {
     let mut pool = simple_parallel::Pool::new(8);
-    // with this many elements, its (hopefully) likely that the
-    // threads won't execute sequentially.
-    const N: usize = 1000;
 
     let mut index = (0..N).map(|_| 0usize).collect::<Vec<_>>();
 

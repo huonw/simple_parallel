@@ -1,12 +1,12 @@
 #![feature(core)]
 extern crate simple_parallel;
 
+// with this many elements, its (hopefully) likely that the
+// threads won't execute sequentially.
+const N: usize = 10000;
+
 #[test]
 fn unordered_map_probabilistic_out_of_ordering() {
-    // with this many elements, its (hopefully) likely that the
-    // threads won't execute sequentially.
-    const N: usize = 1000;
-
     let f = |_: usize| ();
     let iter = simple_parallel::unordered_map(0..N, &f);
 
@@ -18,10 +18,6 @@ fn unordered_map_probabilistic_out_of_ordering() {
 
 #[test]
 fn map_in_order() {
-    // with this many elements, its (hopefully) likely that the
-    // threads won't execute sequentially.
-    const N: usize = 1000;
-
     let f = |i: usize| i;
     let iter = simple_parallel::map(0..N, &f);
 
@@ -32,10 +28,6 @@ fn map_in_order() {
 #[test]
 fn pool_unordered() {
     let mut pool = simple_parallel::Pool::new(8);
-
-    // with this many elements, its (hopefully) likely that the
-    // threads won't execute sequentially.
-    const N: usize = 1000;
 
     let f = |_: usize| {};
     let iter = pool.unordered_map(0..N, &f);
@@ -51,10 +43,6 @@ fn pool_unordered() {
 #[test]
 fn pool_map_in_order() {
     let mut pool = simple_parallel::Pool::new(8);
-
-    // with this many elements, its (hopefully) likely that the
-    // threads won't execute sequentially.
-    const N: usize = 1000;
 
     let f = |i: usize| i;
     let iter = pool.map(0..N, &f);
