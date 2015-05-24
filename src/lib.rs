@@ -212,7 +212,6 @@
 //! Fourier transform implementation (it really works, and the
 //! parallelism does buy something... when tuned).
 #![cfg_attr(feature = "unstable", feature(scoped))]
-#![feature(core)]
 
 #[cfg(feature = "unstable")]
 use std::thread;
@@ -221,6 +220,8 @@ use std::iter::IntoIterator;
 
 #[cfg(feature = "unstable")]
 mod maps;
+
+mod fnbox;
 
 pub mod pool;
 

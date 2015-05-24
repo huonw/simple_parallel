@@ -3,9 +3,9 @@ use std::iter::IntoIterator;
 use std::{marker, mem};
 use std::sync::{mpsc, atomic, Mutex, Arc};
 use std::thread;
-use std::boxed::FnBox;
+use fnbox::FnBox;
 
-type JobInner<'b> =  Box<for<'a> FnBox(&'a [mpsc::Sender<Work>]) + Send + 'b>;
+type JobInner<'b> =  Box<for<'a> FnBox<&'a [mpsc::Sender<Work>]> + Send + 'b>;
 struct Job {
     func: JobInner<'static>,
 }
@@ -175,7 +175,7 @@ impl Pool {
             }
 
             while let Ok(Some(job)) = rx.recv() {
-                (job.func).call_box((&txs,));
+                (job.func).call_box(&txs);
                 let job_panicked = panicked.load(atomic::Ordering::SeqCst);
                 let msg = if job_panicked { Err(()) } else { Ok(()) };
                 finished_tx.tx.send(msg).unwrap();
