@@ -67,7 +67,7 @@
 //!
 //! ```toml
 //! [dependencies]
-//! simple_parallel = "0.1"
+//! simple_parallel = "0.2"
 //! ```
 //!
 //! The latest development version can be obtained [on
