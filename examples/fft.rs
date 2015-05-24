@@ -4,11 +4,15 @@ extern crate strided; // https://crates.io/crates/strided
 extern crate num; // https://crates.io/crates/num
 extern crate simple_parallel;
 
+#[cfg(feature = "unstable")]
 use std::f64;
+#[cfg(feature = "unstable")]
 use num::complex::{Complex, Complex64};
+#[cfg(feature = "unstable")]
 use strided::{MutStride, Stride};
 
 /// Writes the forward DFT of `input` to `output`.
+#[cfg(feature = "unstable")]
 fn fft(input: Stride<Complex64>, mut output: MutStride<Complex64>) {
     // check it's a power of two.
     assert!(input.len() == output.len() && input.len().count_ones() == 1);
@@ -55,6 +59,7 @@ fn fft(input: Stride<Complex64>, mut output: MutStride<Complex64>) {
     }
 }
 
+#[cfg(feature = "unstable")]
 fn main() {
     let a = [Complex::new(3., 0.), Complex::new(1., 0.),
              Complex::new(2., 0.), Complex::new(-1., 0.)];
@@ -62,4 +67,9 @@ fn main() {
 
     fft(Stride::new(&a), MutStride::new(&mut b));
     println!("forward:\n{:?}\n->\n{:?}", a, b);
+}
+
+#[cfg(not(feature = "unstable"))]
+fn main() {
+    println!("compile with --features unstable")
 }

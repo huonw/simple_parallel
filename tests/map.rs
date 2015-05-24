@@ -1,3 +1,4 @@
+#![cfg(feature = "unstable")]
 #![feature(core)]
 extern crate simple_parallel;
 
@@ -30,7 +31,7 @@ fn pool_unordered() {
     let mut pool = simple_parallel::Pool::new(8);
 
     let f = |_: usize| {};
-    let iter = pool.unordered_map(0..N, &f);
+    let iter = unsafe {pool.unordered_map(0..N, &f)};
 
     // see if there are any elements where the order they come out of
     // the original iterator is different to the order in which they
@@ -45,7 +46,7 @@ fn pool_map_in_order() {
     let mut pool = simple_parallel::Pool::new(8);
 
     let f = |i: usize| i;
-    let iter = pool.map(0..N, &f);
+    let iter = unsafe {pool.map(0..N, &f)};
 
     assert!(std::iter::order::eq(iter, 0..N));
 }

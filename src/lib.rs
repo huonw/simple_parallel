@@ -41,6 +41,24 @@
 //!
 //! Either way, **this is not recommended for general use**.
 //!
+//! # `simple_parallel` and stability
+//!
+//! This library is built around the same idea as
+//! `std::thread::scoped`, and some functions suffer from [its
+//! problems](https://github.com/rust-lang/rust/issues/24292). In
+//! particular, there are several functions that either use `scoped`
+//! directly, or expose a similar API.
+//!
+//! The version of this library usable with Rust 1.0 only exposes
+//! `Pool`, which manually implement the same functionality as
+//! `std::thread::scoped`, but do it in a way that avoids feature
+//! gates. However, the `map` and `unordered_map` methods have the
+//! same unsafety problem and so are marked `unsafe` (at least until
+//! the standard library has a solution).
+//!
+//! The APIs that need the `scoped` functionality are still available
+//! only nightly, with the `simple_parallel/unstable` feature.
+//!
 //! # Usage
 //!
 //! This is [available on
@@ -60,12 +78,15 @@
 //! Initialise an array, in parallel.
 //!
 //! ```rust
+//! # #[cfg(feature = "unstable")] fn foo() {
 //! let mut data = [0; 10];
 //! // fill the array, with one thread for each element:
 //! simple_parallel::for_(data.iter_mut().enumerate(), |(i, elem)| {
 //!     *elem = i as i32;
 //! });
+//! # }
 //!
+//! # let mut data = [0; 10];
 //! // now adjust that data, with a threadpool:
 //! let mut pool = simple_parallel::Pool::new(4);
 //! pool.for_(data.iter_mut(), |elem| *elem *= 2);
@@ -76,6 +97,7 @@
 //! input order, unlike `unordered_map`),
 //!
 //! ```rust
+//! #[cfg(feature = "unstable")] fn foo() {
 //! use std::collections::BTreeMap;
 //!
 //! let mut map = BTreeMap::new();
@@ -98,6 +120,7 @@
 //! for value in par_iter {
 //!     println!("I computed {}", value);
 //! }
+//! # }
 //! ```
 //!
 //! Sum an arbitrarily long slice, in parallel, by summing subsections and adding
@@ -110,6 +133,7 @@
 //! // limit the spew of thread spawning to something sensible
 //! const NUM_CHUNKS: usize = 8;
 //!
+//! # #[cfg(feature = "unstable")]
 //! fn sum(x: &[f64]) -> f64 {
 //!     // (round up)
 //!     let elements_per_chunk = (x.len() + NUM_CHUNKS - 1) / NUM_CHUNKS;
@@ -157,6 +181,7 @@
 //! point is `both` naturally running things in parallel.)
 //!
 //! ```rust
+//! # #[cfg(feature = "unstable")] fn foo() {
 //! /// Merges the two sorted runs `left` and `right`.
 //! /// That is, after `merge(left, right)`,
 //! ///
@@ -178,6 +203,7 @@
 //!    // now combine the two sorted halves
 //!    merge(left, right)
 //! }
+//! # }
 //! ```
 //!
 //! The [`examples`
@@ -185,19 +211,25 @@
 //! contains more intricate example(s), such as a parallel fast
 //! Fourier transform implementation (it really works, and the
 //! parallelism does buy something... when tuned).
-#![feature(core, scoped)]
+#![cfg_attr(feature = "unstable", feature(scoped))]
+#![feature(core)]
 
+#[cfg(feature = "unstable")]
 use std::thread;
+#[cfg(feature = "unstable")]
 use std::iter::IntoIterator;
 
+#[cfg(feature = "unstable")]
 mod maps;
 
 pub mod pool;
 
 pub mod one_to_one {
+    #[cfg(feature = "unstable")]
     pub use maps::{unordered_map, UnorderedParMap, map, ParMap};
 }
 
+#[cfg(feature = "unstable")]
 pub use one_to_one::{map, unordered_map};
 
 pub use pool::Pool;
@@ -208,6 +240,7 @@ pub use pool::Pool;
 /// If `f` panics, so does `for_`. If this occurs, the number of
 /// elements of `iter` that have had `f` called on them is
 /// unspecified.
+#[cfg(feature = "unstable")]
 pub fn for_<I: IntoIterator, F>(iter: I, ref f: F)
     where I::Item: Send, F: Fn(I::Item) + Sync
 {
@@ -224,6 +257,7 @@ pub fn for_<I: IntoIterator, F>(iter: I, ref f: F)
 /// This is the same (including panic semantics) as `(f(x), f(y))`, up
 /// to ordering. It is designed to be used for divide-and-conquer
 /// algorithms.
+#[cfg(feature = "unstable")]
 pub fn both<T, U, F>(x: T, y: T, ref f: F) -> (U, U)
     where T: Send,
           U: Send,

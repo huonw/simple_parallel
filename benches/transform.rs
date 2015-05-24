@@ -1,3 +1,4 @@
+#![cfg(feature = "unstable")]
 #![feature(test)]
 extern crate test;
 extern crate num_cpus;
@@ -28,7 +29,9 @@ fn pool_individual(b: &mut test::Bencher) {
     let mut pool = simple_parallel::Pool::new(num_cpus::get());
     let f = |v: &&[i32]| sum(v.iter().cloned());
     run(b, |w| {
-        sum(pool.map(w, &f))
+        unsafe {
+            sum(pool.map(w, &f))
+        }
     })
 }
 
@@ -50,6 +53,8 @@ fn pool_chunked(b: &mut test::Bencher) {
     run(b, |w| {
         let per_chunk = (w.len() + n - 1) / n;
 
-        sum(pool.map(w.chunks(per_chunk), &f))
+        unsafe {
+            sum(pool.map(w.chunks(per_chunk), &f))
+        }
     })
 }

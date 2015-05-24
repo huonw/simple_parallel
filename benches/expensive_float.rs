@@ -1,3 +1,4 @@
+#![cfg(feature = "unstable")]
 #![feature(test)]
 extern crate test;
 extern crate simple_parallel;
@@ -24,7 +25,7 @@ fn pool(b: &mut test::Bencher) {
     let mut pool = simple_parallel::Pool::new(4);
     let f = expensive;
     b.iter(|| {
-        pool.map(0..TOP, &f).collect::<Vec<_>>()
+        unsafe {pool.map(0..TOP, &f).collect::<Vec<_>>()}
     })
 }
 #[bench]

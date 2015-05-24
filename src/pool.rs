@@ -61,7 +61,7 @@ struct Job {
 ///
 ///     // add the two arrays, in parallel
 ///     let f = |(x, y): (&i32, &i32)| *x + *y;
-///     let z: Vec<_> = pool.map(v.iter().zip(w.iter()), &f).collect();
+///     let z: Vec<_> = unsafe {pool.map(v.iter().zip(w.iter()), &f).collect()};
 ///
 ///     assert_eq!(z, &[5, 3, 4, 8, 3, 6, 3, 6]);
 /// }
@@ -145,7 +145,7 @@ impl Pool {
         let (finished_tx, finished_rx) = mpsc::channel();
 
         thread::spawn(move || {
-            let ref panicked = atomic::AtomicBool::new(false);
+            let panicked = Arc::new(atomic::AtomicBool::new(false));
 
             let mut _guards = Vec::with_capacity(n_threads);
             let mut txs = Vec::with_capacity(n_threads);
@@ -158,9 +158,10 @@ impl Pool {
                 let (subtx, subrx) = mpsc::channel::<Work>();
                 txs.push(subtx);
 
-                _guards.push(thread::scoped(move || {
+                let panicked = panicked.clone();
+                _guards.push(thread::spawn(move || {
                     let _canary = PanicCanary {
-                        flag: panicked
+                        flag: &panicked
                     };
                     loop {
                         match subrx.recv() {
@@ -275,6 +276,14 @@ impl Pool {
     /// The iterator yields `(uint, T)` tuples, where the `uint` is
     /// the index of the element in the original iterator.
     ///
+    /// # Unsafety
+    ///
+    /// This is unsafe because it uses the same pattern as the old
+    /// `std::thread::scoped`, which can cause memory unsafety due to
+    /// destructors. See
+    /// [#24292](https://github.com/rust-lang/rust/issues/24292) for
+    /// more details.
+    ///
     /// # Examples
     ///
     /// ```rust
@@ -285,12 +294,12 @@ impl Pool {
     /// // adjust each element in parallel, and iterate over them as
     /// // they are generated (or as close to that as possible)
     /// let f = |i| i + 10;
-    /// for (index, output) in pool.unordered_map(0..8, &f) {
+    /// for (index, output) in unsafe {pool.unordered_map(0..8, &f)} {
     ///     // each element is exactly 10 more than its original index
     ///     assert_eq!(output, index as i32 + 10);
     /// }
     /// ```
-    pub fn unordered_map<'pool, 'a, I: IntoIterator, F, T>(&'pool mut self, iter: I, f: &'a F)
+    pub unsafe fn unordered_map<'pool, 'a, I: IntoIterator, F, T>(&'pool mut self, iter: I, f: &'a F)
         -> UnorderedParMap<'pool, 'a, T>
         where I: 'a + Send,
               I::Item: Send + 'a,
@@ -316,7 +325,7 @@ impl Pool {
         const INITIAL_FACTOR: usize = 4;
         const BUFFER_FACTOR: usize = INITIAL_FACTOR / 2;
 
-        let handle = unsafe {
+        let handle =
             self.execute((needwork_tx, shared),
                          move |&mut (ref needwork_tx, ref shared)| {
                              let mut needwork_tx = Some(needwork_tx.clone());
@@ -395,8 +404,7 @@ impl Pool {
                                      }
                                  }
                              }
-                         })
-        };
+                         });
 
         UnorderedParMap {
             rx: rx,
@@ -414,6 +422,14 @@ impl Pool {
     ///
     /// See `unordered_map` if the output order is unimportant.
     ///
+    /// # Unsafety
+    ///
+    /// This is unsafe because it uses the same pattern as the old
+    /// `std::thread::scoped`, which can cause memory unsafety due to
+    /// destructors. See
+    /// [#24292](https://github.com/rust-lang/rust/issues/24292) for
+    /// more details.
+    ///
     /// # Examples
     ///
     /// ```rust
@@ -423,11 +439,11 @@ impl Pool {
     ///
     /// // create a vector by adjusting 0..8, in parallel
     /// let f = |i| i + 10;
-    /// let elements: Vec<_> = pool.map(0..8, &f).collect();
+    /// let elements: Vec<_> = unsafe {pool.map(0..8, &f).collect()};
     ///
     /// assert_eq!(elements, &[10, 11, 12, 13, 14, 15, 16, 17]);
     /// ```
-    pub fn map<'pool, 'a, I: IntoIterator, F, T>(&'pool mut self, iter: I, f: &'a F)
+    pub unsafe fn map<'pool, 'a, I: IntoIterator, F, T>(&'pool mut self, iter: I, f: &'a F)
         -> ParMap<'pool, 'a, T>
         where I: 'a + Send,
               I::Item: Send + 'a,

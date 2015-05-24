@@ -1,3 +1,4 @@
+#![cfg(feature = "unstable")]
 extern crate simple_parallel;
 
 use std::sync::atomic::{AtomicUsize, ATOMIC_USIZE_INIT, Ordering};

@@ -1,3 +1,4 @@
+#![cfg(feature = "unstable")]
 extern crate simple_parallel;
 
 #[test]
