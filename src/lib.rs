@@ -211,14 +211,9 @@
 //! contains more intricate example(s), such as a parallel fast
 //! Fourier transform implementation (it really works, and the
 //! parallelism does buy something... when tuned).
-#![cfg_attr(feature = "unstable", feature(scoped))]
 
-#[cfg(feature = "unstable")]
-use std::thread;
-#[cfg(feature = "unstable")]
-use std::iter::IntoIterator;
+extern crate crossbeam;
 
-#[cfg(feature = "unstable")]
 mod maps;
 
 mod fnbox;
@@ -226,11 +221,9 @@ mod fnbox;
 pub mod pool;
 
 pub mod one_to_one {
-    #[cfg(feature = "unstable")]
     pub use maps::{unordered_map, UnorderedParMap, map, ParMap};
 }
 
-#[cfg(feature = "unstable")]
 pub use one_to_one::{map, unordered_map};
 
 pub use pool::Pool;
@@ -241,15 +234,14 @@ pub use pool::Pool;
 /// If `f` panics, so does `for_`. If this occurs, the number of
 /// elements of `iter` that have had `f` called on them is
 /// unspecified.
-#[cfg(feature = "unstable")]
 pub fn for_<I: IntoIterator, F>(iter: I, ref f: F)
     where I::Item: Send, F: Fn(I::Item) + Sync
 {
-    let _guards: Vec<_> = iter.into_iter().map(|elem| {
-        thread::scoped(move || {
-            f(elem)
-        })
-    }).collect();
+    crossbeam::scope(|scope| {
+        for elem in iter {
+            scope.spawn(move || f(elem));
+        }
+    });
 }
 
 /// Execute `f` on both `x` and `y`, in parallel, returning the
@@ -258,14 +250,16 @@ pub fn for_<I: IntoIterator, F>(iter: I, ref f: F)
 /// This is the same (including panic semantics) as `(f(x), f(y))`, up
 /// to ordering. It is designed to be used for divide-and-conquer
 /// algorithms.
-#[cfg(feature = "unstable")]
 pub fn both<T, U, F>(x: T, y: T, ref f: F) -> (U, U)
     where T: Send,
           U: Send,
           F: Sync + Fn(T) -> U
 {
-    let guard = thread::scoped(move || f(y));
-    let a = f(x);
-    let b = guard.join();
-    (a, b)
+    crossbeam::scope(|scope| {
+        let guard = scope.spawn(move || f(y));
+        let a = f(x);
+        let b = guard.join();
+        (a, b)
+
+    })
 }

@@ -1,8 +1,9 @@
 use std::sync::mpsc::{self, Sender, Receiver};
-use std::thread::{self,JoinGuard};
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 use std::iter::IntoIterator;
+
+use crossbeam::{Scope, ScopedJoinHandle};
 
 struct Packet<T> {
     // this should be unique for a given instance of `*ParMap`
@@ -25,12 +26,12 @@ impl<T> Eq for Packet<T> {}
 
 /// A parallel-mapping iterator that doesn't care about the order in
 /// which elements come out.
-pub struct UnorderedParMap<'a, T: 'a + Send> {
+pub struct UnorderedParMap<T: Send> {
     rx: Receiver<Packet<T>>,
-    _guards: Vec<JoinGuard<'a, ()>>
+    _guards: Vec<ScopedJoinHandle<()>>
 }
 
-impl<'a,T: 'static + Send> Iterator for UnorderedParMap<'a, T> {
+impl<T: 'static + Send> Iterator for UnorderedParMap<T> {
     type Item = (usize, T);
 
     fn next(&mut self) -> Option<(usize, T)> {
@@ -62,9 +63,9 @@ impl<T: Send + 'static> Drop for Panicker<T> {
 /// This behaves like `simple_parallel::map`, but does not make
 /// efforts to ensure that the elements are returned in the order of
 /// `iter`, hence this is cheaper.
-pub fn unordered_map<'a, I: IntoIterator, F, T>(iter: I, f: &'a F) -> UnorderedParMap<'a, T>
+pub fn unordered_map<'a, I: IntoIterator, F, T>(scope: &Scope<'a>, iter: I, f: &'a F) -> UnorderedParMap<T>
     where I::Item: Send + 'a,
-          F: 'a + Sync + Fn(I::Item) -> T,
+          F: Sync + Fn(I::Item) -> T,
           T: Send + 'static
 {
     let (tx, rx) = mpsc::channel();
@@ -73,7 +74,7 @@ pub fn unordered_map<'a, I: IntoIterator, F, T>(iter: I, f: &'a F) -> UnorderedP
         let tx = tx.clone();
         let f = f.clone();
 
-        thread::scoped(move || {
+        scope.spawn(move || {
             let mut p = Panicker { tx: tx, idx: idx, all_ok: false };
             let val = f(elem);
             let _ = p.tx.send(Packet { idx: idx, data: Some(val) });
@@ -88,13 +89,13 @@ pub fn unordered_map<'a, I: IntoIterator, F, T>(iter: I, f: &'a F) -> UnorderedP
 }
 
 /// A parallel-mapping iterator.
-pub struct ParMap<'a, T: 'a + Send> {
-    unordered: UnorderedParMap<'a, T>,
+pub struct ParMap<T:  Send> {
+    unordered: UnorderedParMap<T>,
     looking_for: usize,
     queue: BinaryHeap<Packet<T>>
 }
 
-impl<'a, T: Send + 'static> Iterator for ParMap<'a, T> {
+impl<T: Send + 'static> Iterator for ParMap<T> {
     type Item = T;
 
     fn next(&mut self) -> Option<T> {
@@ -127,13 +128,13 @@ impl<'a, T: Send + 'static> Iterator for ParMap<'a, T> {
 /// This is a drop-in replacement for `iter.map(f)`, that runs in
 /// parallel, and eagerly consumes `iter` spawning a thread for each
 /// element.
-pub fn map<'a, I: IntoIterator, F, T>(iter: I, f: &'a F) -> ParMap<'a, T>
-    where I::Item: Send + 'a,
-          F: 'a + Sync + Fn(I::Item) -> T,
+pub fn map<'a, I: IntoIterator, F, T>(scope: &Scope<'a>, iter: I, f: &'a F) -> ParMap<T>
+    where I::Item: 'a + Send,
+          F: Sync + Fn(I::Item) -> T,
           T: Send + 'static
 {
     ParMap {
-        unordered: unordered_map(iter, f),
+        unordered: unordered_map(scope, iter, f),
         looking_for: 0,
         queue: BinaryHeap::new(),
     }

@@ -5,6 +5,8 @@ use std::sync::{mpsc, atomic, Mutex, Arc};
 use std::thread;
 use fnbox::FnBox;
 
+use crossbeam::{self, Scope};
+
 type JobInner<'b> =  Box<for<'a> FnBox<&'a [mpsc::Sender<Work>]> + Send + 'b>;
 struct Job {
     func: JobInner<'static>,
@@ -48,6 +50,8 @@ struct Job {
 /// # Example
 ///
 /// ```rust
+/// extern crate crossbeam;
+/// extern crate simple_parallel;
 /// use simple_parallel::Pool;
 ///
 /// // a function that takes some arbitrary pool and uses the pool to
@@ -61,17 +65,21 @@ struct Job {
 ///
 ///     // add the two arrays, in parallel
 ///     let f = |(x, y): (&i32, &i32)| *x + *y;
-///     let z: Vec<_> = unsafe {pool.map(v.iter().zip(w.iter()), &f).collect()};
+///     let z: Vec<_> = crossbeam::scope(|scope| {
+///         pool.map(scope, v.iter().zip(w.iter()), &f).collect()
+///     });
 ///
 ///     assert_eq!(z, &[5, 3, 4, 8, 3, 6, 3, 6]);
 /// }
 ///
+/// # fn main() {
 /// let mut pool = Pool::new(4);
 /// do_work(&mut pool);
+/// # }
 /// ```
 pub struct Pool {
-    job_queue: mpsc::Sender<Option<Job>>,
-    job_finished: mpsc::Receiver<Result<(), ()>>,
+    job_queue: mpsc::Sender<(Option<Job>, mpsc::Sender<Result<(), ()>>)>,
+    job_status: Option<Arc<Mutex<JobStatus>>>,
     n_threads: usize,
 }
 #[derive(Copy, Clone)]
@@ -80,6 +88,11 @@ struct WorkerId { n: usize }
 type WorkInner<'a> = &'a mut (FnMut(WorkerId) + Send + 'a);
 struct Work {
     func: WorkInner<'static>
+}
+
+struct JobStatus {
+    wait: bool,
+    job_finished: mpsc::Receiver<Result<(), ()>>,
 }
 
 /// A token representing a job submitted to the thread pool.
@@ -91,41 +104,41 @@ struct Work {
 /// panics (either via `wait` or in the destructor).
 pub struct JobHandle<'pool, 'f> {
     pool: &'pool mut Pool,
-    wait: bool,
+    status: Arc<Mutex<JobStatus>>,
     _funcs: marker::PhantomData<&'f ()>,
 }
+
+impl JobStatus {
+    fn wait(&mut self) {
+        if self.wait {
+            self.wait = false;
+            self.job_finished.recv().unwrap().unwrap();
+        }
+    }
+}
+
 impl<'pool, 'f> JobHandle<'pool, 'f> {
     /// Block until the job is finished.
     ///
     /// # Panics
     ///
     /// This will panic if the job panicked.
-    pub fn wait(mut self) {
-        self.wait = false;
-        self.pool.job_finished.recv().unwrap().unwrap();
+    pub fn wait(&self) {
+        self.status.lock().unwrap().wait();
     }
 }
 impl<'pool, 'f> Drop for JobHandle<'pool, 'f> {
     fn drop(&mut self) {
-        if self.wait {
-            self.pool.job_finished.recv().unwrap().unwrap();
-        }
+        self.wait();
+        self.pool.job_status = None;
     }
 }
 
 impl Drop for Pool {
     fn drop(&mut self) {
-        self.job_queue.send(None).unwrap();
-        self.job_finished.recv().unwrap().unwrap();
-    }
-}
-struct PanicHandler {
-    tx: mpsc::Sender<Result<(), ()>>
-}
-impl Drop for PanicHandler {
-    fn drop(&mut self) {
-        let msg = if thread::panicking() { Err(()) } else { Ok(()) };
-        self.tx.send(msg).unwrap();
+        let (tx, rx) = mpsc::channel();
+        self.job_queue.send((None, tx)).unwrap();
+        rx.recv().unwrap().unwrap();
     }
 }
 struct PanicCanary<'a> {
@@ -141,17 +154,13 @@ impl<'a> Drop for PanicCanary<'a> {
 impl Pool {
     /// Create a new thread pool with `n_threads` worker threads.
     pub fn new(n_threads: usize) -> Pool {
-        let (tx, rx) = mpsc::channel::<Option<Job>>();
-        let (finished_tx, finished_rx) = mpsc::channel();
+        let (tx, rx) = mpsc::channel::<(Option<Job>, mpsc::Sender<Result<(), ()>>)>();
 
         thread::spawn(move || {
             let panicked = Arc::new(atomic::AtomicBool::new(false));
 
             let mut _guards = Vec::with_capacity(n_threads);
             let mut txs = Vec::with_capacity(n_threads);
-            let finished_tx = PanicHandler {
-                tx: finished_tx,
-            };
 
             for i in 0..n_threads {
                 let id = WorkerId { n: i };
@@ -174,19 +183,27 @@ impl Pool {
                 }))
             }
 
-            while let Ok(Some(job)) = rx.recv() {
-                (job.func).call_box(&txs);
-                let job_panicked = panicked.load(atomic::Ordering::SeqCst);
-                let msg = if job_panicked { Err(()) } else { Ok(()) };
-                finished_tx.tx.send(msg).unwrap();
-
-                if job_panicked { break }
+            loop {
+                match rx.recv() {
+                    Ok((Some(job), finished_tx)) => {
+                        (job.func).call_box(&txs);
+                        let job_panicked = panicked.load(atomic::Ordering::SeqCst);
+                        let msg = if job_panicked { Err(()) } else { Ok(()) };
+                        finished_tx.send(msg).unwrap();
+                        if job_panicked { break }
+                    }
+                    Ok((None, finished_tx)) => {
+                        finished_tx.send(Ok(())).unwrap();
+                        break
+                    }
+                    Err(_) => break,
+                }
             }
         });
 
         Pool {
             job_queue: tx,
-            job_finished: finished_rx,
+            job_status: None,
             n_threads: n_threads,
         }
     }
@@ -228,8 +245,9 @@ impl Pool {
 
         let mut work_rxs = work_rxs.into_iter();
 
-        unsafe {
+        crossbeam::scope(|scope| unsafe {
             let handle = self.execute(
+                scope,
                 needwork_tx,
                 |needwork_tx| {
                     let mut needwork_tx = Some(needwork_tx.clone());
@@ -263,7 +281,7 @@ impl Pool {
                 });
 
             handle.wait();
-        }
+        })
     }
 
     /// Execute `f` on each element in `iter` in parallel across the
@@ -276,17 +294,12 @@ impl Pool {
     /// The iterator yields `(uint, T)` tuples, where the `uint` is
     /// the index of the element in the original iterator.
     ///
-    /// # Unsafety
-    ///
-    /// This is unsafe because it uses the same pattern as the old
-    /// `std::thread::scoped`, which can cause memory unsafety due to
-    /// destructors. See
-    /// [#24292](https://github.com/rust-lang/rust/issues/24292) for
-    /// more details.
-    ///
     /// # Examples
     ///
     /// ```rust
+    /// extern crate crossbeam;
+    /// extern crate simple_parallel;
+    /// # fn main() {
     /// use simple_parallel::Pool;
     ///
     /// let mut pool = Pool::new(4);
@@ -294,12 +307,15 @@ impl Pool {
     /// // adjust each element in parallel, and iterate over them as
     /// // they are generated (or as close to that as possible)
     /// let f = |i| i + 10;
-    /// for (index, output) in unsafe {pool.unordered_map(0..8, &f)} {
-    ///     // each element is exactly 10 more than its original index
-    ///     assert_eq!(output, index as i32 + 10);
-    /// }
+    /// crossbeam::scope(|scope| {
+    ///     for (index, output) in pool.unordered_map(scope, 0..8, &f) {
+    ///         // each element is exactly 10 more than its original index
+    ///         assert_eq!(output, index as i32 + 10);
+    ///     }
+    /// })
+    /// # }
     /// ```
-    pub unsafe fn unordered_map<'pool, 'a, I: IntoIterator, F, T>(&'pool mut self, iter: I, f: &'a F)
+    pub fn unordered_map<'pool, 'a, I: IntoIterator, F, T>(&'pool mut self, scope: &Scope<'a>, iter: I, f: &'a F)
         -> UnorderedParMap<'pool, 'a, T>
         where I: 'a + Send,
               I::Item: Send + 'a,
@@ -325,8 +341,8 @@ impl Pool {
         const INITIAL_FACTOR: usize = 4;
         const BUFFER_FACTOR: usize = INITIAL_FACTOR / 2;
 
-        let handle =
-            self.execute((needwork_tx, shared),
+        let handle = unsafe {
+            self.execute(scope, (needwork_tx, shared),
                          move |&mut (ref needwork_tx, ref shared)| {
                              let mut needwork_tx = Some(needwork_tx.clone());
                              let tx = tx.clone();
@@ -404,7 +420,8 @@ impl Pool {
                                      }
                                  }
                              }
-                         });
+                         })
+        };
 
         UnorderedParMap {
             rx: rx,
@@ -422,28 +439,24 @@ impl Pool {
     ///
     /// See `unordered_map` if the output order is unimportant.
     ///
-    /// # Unsafety
-    ///
-    /// This is unsafe because it uses the same pattern as the old
-    /// `std::thread::scoped`, which can cause memory unsafety due to
-    /// destructors. See
-    /// [#24292](https://github.com/rust-lang/rust/issues/24292) for
-    /// more details.
-    ///
     /// # Examples
     ///
     /// ```rust
+    /// extern crate crossbeam;
+    /// extern crate simple_parallel;
     /// use simple_parallel::Pool;
     ///
+    /// # fn main() {
     /// let mut pool = Pool::new(4);
     ///
     /// // create a vector by adjusting 0..8, in parallel
     /// let f = |i| i + 10;
-    /// let elements: Vec<_> = unsafe {pool.map(0..8, &f).collect()};
+    /// let elements: Vec<_> = crossbeam::scope(|scope| pool.map(scope, 0..8, &f).collect());
     ///
     /// assert_eq!(elements, &[10, 11, 12, 13, 14, 15, 16, 17]);
+    /// # }
     /// ```
-    pub unsafe fn map<'pool, 'a, I: IntoIterator, F, T>(&'pool mut self, iter: I, f: &'a F)
+    pub fn map<'pool, 'a, I: IntoIterator, F, T>(&'pool mut self, scope: &Scope<'a>, iter: I, f: &'a F)
         -> ParMap<'pool, 'a, T>
         where I: 'a + Send,
               I::Item: Send + 'a,
@@ -451,7 +464,7 @@ impl Pool {
               T: Send + 'a
     {
         ParMap {
-            unordered: self.unordered_map(iter, f),
+            unordered: self.unordered_map(scope, iter, f),
             looking_for: 0,
             queue: BinaryHeap::new(),
         }
@@ -473,14 +486,19 @@ impl Pool {
     /// The job must take pains to ensure `main_fn` doesn't quit
     /// before the workers do.
     pub unsafe fn execute<'pool, 'f, A, GenFn, WorkerFn, MainFn>(
-        &'pool mut self, data: A, gen_fn: GenFn, main_fn: MainFn) -> JobHandle<'pool, 'f>
+        &'pool mut self, scope: &Scope<'f>, data: A, gen_fn: GenFn, main_fn: MainFn) -> JobHandle<'pool, 'f>
 
         where A: 'f + Send,
               GenFn: 'f + FnMut(&mut A) -> WorkerFn + Send,
               WorkerFn: 'f + FnMut(WorkerId) + Send,
               MainFn: 'f + FnOnce(A) + Send,
     {
-        self.execute_nonunsafe(data, gen_fn, main_fn)
+        let handle = self.execute_nonunsafe(data, gen_fn, main_fn);
+        let status = handle.status.clone();
+        scope.defer(move || {
+            status.lock().unwrap().wait();
+        });
+        handle
     }
 
     // separate function to ensure we get `unsafe` checking inside this one
@@ -514,11 +532,19 @@ impl Pool {
         let func: JobInner<'static> = unsafe {
             mem::transmute(func)
         };
-        self.job_queue.send(Some(Job { func: func })).unwrap();
+        let (tx, rx) = mpsc::channel();
+        self.job_queue.send((Some(Job { func: func }), tx)).unwrap();
 
+        let status = Arc::new(Mutex::new(JobStatus {
+            wait: true,
+            job_finished: rx,
+        }));
+        // this probably isn't quite right? what happens to older jobs
+        // (e.g. if a previous one was mem::forget'd)
+        self.job_status = Some(status.clone());
         JobHandle {
             pool: self,
-            wait: true,
+            status: status,
             _funcs: marker::PhantomData,
         }
     }
