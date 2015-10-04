@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use std::sync::mpsc::{self, Sender, Receiver};
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
@@ -63,13 +64,13 @@ impl<T: Send + 'static> Drop for Panicker<T> {
 /// This behaves like `simple_parallel::map`, but does not make
 /// efforts to ensure that the elements are returned in the order of
 /// `iter`, hence this is cheaper.
-pub fn unordered_map<'a, I: IntoIterator, F, T>(scope: &Scope<'a>, iter: I, f: &'a F) -> UnorderedParMap<T>
+pub fn unordered_map<'a, I: IntoIterator, F, T>(scope: &Scope<'a>, iter: I, f: F) -> UnorderedParMap<T>
     where I::Item: Send + 'a,
-          F: Sync + Fn(I::Item) -> T,
+          F: 'a + Send + Sync + Fn(I::Item) -> T,
           T: Send + 'static
 {
     let (tx, rx) = mpsc::channel();
-
+    let f = Arc::new(f);
     let guards = iter.into_iter().enumerate().map(|(idx, elem)| {
         let tx = tx.clone();
         let f = f.clone();
@@ -128,9 +129,9 @@ impl<T: Send + 'static> Iterator for ParMap<T> {
 /// This is a drop-in replacement for `iter.map(f)`, that runs in
 /// parallel, and eagerly consumes `iter` spawning a thread for each
 /// element.
-pub fn map<'a, I: IntoIterator, F, T>(scope: &Scope<'a>, iter: I, f: &'a F) -> ParMap<T>
+pub fn map<'a, I: IntoIterator, F, T>(scope: &Scope<'a>, iter: I, f: F) -> ParMap<T>
     where I::Item: 'a + Send,
-          F: Sync + Fn(I::Item) -> T,
+          F: 'a + Send + Sync + Fn(I::Item) -> T,
           T: Send + 'static
 {
     ParMap {

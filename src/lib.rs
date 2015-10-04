@@ -104,14 +104,12 @@
 //! map.insert('a', 1);
 //! map.insert('x', 55);
 //!
-//! let f = |(&c, &elem): (&char, _)| {
+//! // (`IntoIterator` is used, so "direct" iteration like this is fine.)
+//! let par_iter = simple_parallel::map(&map, |(&c, &elem)| {
 //!     let mut x = elem  * c as i32;
 //!     // ... something complicated and expensive ...
 //!     return x as f64
-//! };
-//!
-//! // (`IntoIterator` is used, so "direct" iteration like this is fine.)
-//! let par_iter = simple_parallel::map(&map, &f);
+//! });
 //!
 //! // the computation is executing on several threads in the
 //! // background, so that elements are hopefully ready as soon as

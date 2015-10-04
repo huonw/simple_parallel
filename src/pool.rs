@@ -64,9 +64,8 @@ struct Job {
 ///     let w = [2, 0, 1, 5, 0, 3, 0, 3];
 ///
 ///     // add the two arrays, in parallel
-///     let f = |(x, y): (&i32, &i32)| *x + *y;
 ///     let z: Vec<_> = crossbeam::scope(|scope| {
-///         pool.map(scope, v.iter().zip(w.iter()), &f).collect()
+///         pool.map(scope, v.iter().zip(w.iter()), |(x, y)| *x + *y).collect()
 ///     });
 ///
 ///     assert_eq!(z, &[5, 3, 4, 8, 3, 6, 3, 6]);
@@ -306,34 +305,35 @@ impl Pool {
     ///
     /// // adjust each element in parallel, and iterate over them as
     /// // they are generated (or as close to that as possible)
-    /// let f = |i| i + 10;
     /// crossbeam::scope(|scope| {
-    ///     for (index, output) in pool.unordered_map(scope, 0..8, &f) {
+    ///     for (index, output) in pool.unordered_map(scope, 0..8, |i| i + 10) {
     ///         // each element is exactly 10 more than its original index
     ///         assert_eq!(output, index as i32 + 10);
     ///     }
     /// })
     /// # }
     /// ```
-    pub fn unordered_map<'pool, 'a, I: IntoIterator, F, T>(&'pool mut self, scope: &Scope<'a>, iter: I, f: &'a F)
+    pub fn unordered_map<'pool, 'a, I: IntoIterator, F, T>(&'pool mut self, scope: &Scope<'a>, iter: I, f: F)
         -> UnorderedParMap<'pool, 'a, T>
         where I: 'a + Send,
               I::Item: Send + 'a,
-              F: 'a + Sync + Fn(I::Item) -> T,
+              F: 'a + Sync + Send + Fn(I::Item) -> T,
               T: Send + 'a
     {
         let nthreads = self.n_threads;
         let (needwork_tx, needwork_rx) = mpsc::channel();
         let (work_tx, work_rx) = mpsc::channel();
-        struct Shared<Chan, Atom> {
+        struct Shared<Chan, Atom, F> {
             work: Chan,
             sent: Atom,
-            finished: Atom
+            finished: Atom,
+            func: F,
         }
         let shared = Arc::new(Shared {
             work: Mutex::new(work_rx),
             sent: atomic::AtomicUsize::new(0),
-            finished: atomic::AtomicUsize::new(0)
+            finished: atomic::AtomicUsize::new(0),
+            func: f,
         });
 
         let (tx, rx) = mpsc::channel();
@@ -356,7 +356,7 @@ impl Pool {
                                      };
                                      match data {
                                          Ok(Some((idx, elem))) => {
-                                             let data = f(elem);
+                                             let data = (shared.func)(elem);
                                              let status = tx.send(Packet {
                                                  idx: idx, data: data
                                              });
@@ -422,7 +422,6 @@ impl Pool {
                              }
                          })
         };
-
         UnorderedParMap {
             rx: rx,
             _guard: handle,
@@ -450,17 +449,18 @@ impl Pool {
     /// let mut pool = Pool::new(4);
     ///
     /// // create a vector by adjusting 0..8, in parallel
-    /// let f = |i| i + 10;
-    /// let elements: Vec<_> = crossbeam::scope(|scope| pool.map(scope, 0..8, &f).collect());
+    /// let elements: Vec<_> = crossbeam::scope(|scope| {
+    ///     pool.map(scope, 0..8, |i| i + 10).collect()
+    /// });
     ///
     /// assert_eq!(elements, &[10, 11, 12, 13, 14, 15, 16, 17]);
     /// # }
     /// ```
-    pub fn map<'pool, 'a, I: IntoIterator, F, T>(&'pool mut self, scope: &Scope<'a>, iter: I, f: &'a F)
+    pub fn map<'pool, 'a, I: IntoIterator, F, T>(&'pool mut self, scope: &Scope<'a>, iter: I, f: F)
         -> ParMap<'pool, 'a, T>
         where I: 'a + Send,
               I::Item: Send + 'a,
-              F: 'a + Sync + Fn(I::Item) -> T,
+              F: 'a + Send + Sync + Fn(I::Item) -> T,
               T: Send + 'a
     {
         ParMap {
