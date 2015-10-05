@@ -32,7 +32,7 @@ pub struct UnorderedParMap<T: Send> {
     _guards: Vec<ScopedJoinHandle<()>>
 }
 
-impl<T: 'static + Send> Iterator for UnorderedParMap<T> {
+impl<T: Send> Iterator for UnorderedParMap<T> {
     type Item = (usize, T);
 
     fn next(&mut self) -> Option<(usize, T)> {
@@ -46,12 +46,12 @@ impl<T: 'static + Send> Iterator for UnorderedParMap<T> {
     }
 }
 
-struct Panicker<T: Send + 'static> {
+struct Panicker<T: Send> {
     tx: Sender<Packet<T>>,
     idx: usize,
     all_ok: bool
 }
-impl<T: Send + 'static> Drop for Panicker<T> {
+impl<T: Send> Drop for Panicker<T> {
     fn drop(&mut self) {
         if !self.all_ok {
             let _ = self.tx.send(Packet { idx: self.idx, data: None });
@@ -67,7 +67,7 @@ impl<T: Send + 'static> Drop for Panicker<T> {
 pub fn unordered_map<'a, I: IntoIterator, F, T>(scope: &Scope<'a>, iter: I, f: F) -> UnorderedParMap<T>
     where I::Item: Send + 'a,
           F: 'a + Send + Sync + Fn(I::Item) -> T,
-          T: Send + 'static
+          T: Send + 'a
 {
     let (tx, rx) = mpsc::channel();
     let f = Arc::new(f);
@@ -96,7 +96,7 @@ pub struct ParMap<T:  Send> {
     queue: BinaryHeap<Packet<T>>
 }
 
-impl<T: Send + 'static> Iterator for ParMap<T> {
+impl<T: Send> Iterator for ParMap<T> {
     type Item = T;
 
     fn next(&mut self) -> Option<T> {
@@ -132,7 +132,7 @@ impl<T: Send + 'static> Iterator for ParMap<T> {
 pub fn map<'a, I: IntoIterator, F, T>(scope: &Scope<'a>, iter: I, f: F) -> ParMap<T>
     where I::Item: 'a + Send,
           F: 'a + Send + Sync + Fn(I::Item) -> T,
-          T: Send + 'static
+          T: Send + 'a
 {
     ParMap {
         unordered: unordered_map(scope, iter, f),
