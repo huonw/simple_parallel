@@ -29,16 +29,18 @@ struct Job {
 /// the closures passed in (and elements of iterators used, etc.) can
 /// have borrows pointing into arbitrary stack frames, even stack
 /// frames that don't outlive the pool itself. This differs to
-/// [`thread_pool::ScopedPool`](http://doc.rust-lang.org/threadpool/threadpool/struct.ScopedPool.html),
+/// something like
+/// [`scoped_threadpool`](https://crates.io/crates/scoped_threadpool),
 /// where the jobs must outlive the pool.
 ///
 /// This extra flexibility is achieved with careful unsafe code, by
 /// exposing an API that is a generalised version of
-/// `std::thread::scoped`: at the lowest-level a submitted job returns
-/// a `JobHandle` token that ensures that job is finished before any
-/// data the job might reference is invalidated (i.e. manages the
-/// lifetimes). Higher-level functions will usually wrap or otherwise
-/// hide the handle.
+/// [`crossbeam`](https://github.com/aturon/crossbeam) `Scope::spawn`
+/// and the old `std::thread::scoped`: at the lowest-level a submitted
+/// job returns a `JobHandle` token that ensures that job is finished
+/// before any data the job might reference is invalidated
+/// (i.e. manages the lifetimes). Higher-level functions will usually
+/// wrap or otherwise hide the handle.
 ///
 /// However, this comes at a cost: for easy of implementation `Pool`
 /// currently only exposes "batch" jobs like `for_` and `map` and
@@ -96,8 +98,8 @@ struct JobStatus {
 
 /// A token representing a job submitted to the thread pool.
 ///
-/// This ensures that a job is finished before borrowed resources in
-/// the job (and the pool itself) are invalidated.
+/// This helps ensure that a job is finished before borrowed resources
+/// in the job (and the pool itself) are invalidated.
 ///
 /// If the job panics, this handle will ensure the main thread also
 /// panics (either via `wait` or in the destructor).
@@ -493,17 +495,12 @@ impl Pool {
               WorkerFn: 'f + FnMut(WorkerId) + Send,
               MainFn: 'f + FnOnce(A) + Send,
     {
-        let handle = self.execute_nonunsafe(data, gen_fn, main_fn);
-        let status = handle.status.clone();
-        scope.defer(move || {
-            status.lock().unwrap().wait();
-        });
-        handle
+        self.execute_nonunsafe(scope, data, gen_fn, main_fn)
     }
 
     // separate function to ensure we get `unsafe` checking inside this one
     fn execute_nonunsafe<'pool, 'f, A, GenFn, WorkerFn, MainFn>(
-        &'pool mut self, mut data: A,
+        &'pool mut self, scope: &Scope<'f>, mut data: A,
         mut gen_fn: GenFn, main_fn: MainFn) -> JobHandle<'pool, 'f>
 
         where A: 'f + Send,
@@ -542,6 +539,10 @@ impl Pool {
         // this probably isn't quite right? what happens to older jobs
         // (e.g. if a previous one was mem::forget'd)
         self.job_status = Some(status.clone());
+        let status_ = status.clone();
+        scope.defer(move || {
+            status_.lock().unwrap().wait();
+        });
         JobHandle {
             pool: self,
             status: status,
@@ -572,7 +573,8 @@ impl<T> Eq for Packet<T> {}
 
 /// A parallel-mapping iterator, that yields elements in the order
 /// they are computed, not the order from which they are yielded by
-/// the underlying iterator.
+/// the underlying iterator. Constructed by calling
+/// `Pool::unordered_map`.
 pub struct UnorderedParMap<'pool, 'a, T: 'a + Send> {
     rx: mpsc::Receiver<Packet<T>>,
     _guard: JobHandle<'pool, 'a>,
@@ -589,7 +591,8 @@ impl<'pool, 'a,T: 'a + Send> Iterator for UnorderedParMap<'pool , 'a, T> {
 }
 
 /// A parallel-mapping iterator, that yields elements in the order
-/// they are yielded by the underlying iterator.
+/// they are yielded by the underlying iterator. Constructed by
+/// calling `Pool::map`.
 pub struct ParMap<'pool, 'a, T: 'a + Send> {
     unordered: UnorderedParMap<'pool, 'a, T>,
     looking_for: usize,

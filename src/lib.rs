@@ -8,13 +8,6 @@
 //! for some fairly fancy things to be written with a guarantee of
 //! safety, all without a garbage collector.
 //!
-//! The only dependency is `std` and the basic functionality has no
-//! `unsafe` code at all (the thread pool does use unsafe). Other than
-//! the pool, parallelism is built directly from the functionality
-//! provided by `std::thread` and `std::sync` and leverages their
-//! correctness to automatically ensure the correctness of this
-//! library (at the memory safety level).
-//!
 //! The core design is to simply allow for operations that could occur
 //! on a single thread to execute on many, it is not intending to
 //! serve as a hard boundary between threads; in particular, if
@@ -41,24 +34,6 @@
 //!
 //! Either way, **this is not recommended for general use**.
 //!
-//! # `simple_parallel` and stability
-//!
-//! This library is built around the same idea as
-//! `std::thread::scoped`, and some functions suffer from [its
-//! problems](https://github.com/rust-lang/rust/issues/24292). In
-//! particular, there are several functions that either use `scoped`
-//! directly, or expose a similar API.
-//!
-//! The version of this library usable with Rust 1.0 only exposes
-//! `Pool`, which manually implement the same functionality as
-//! `std::thread::scoped`, but do it in a way that avoids feature
-//! gates. However, the `map` and `unordered_map` methods have the
-//! same unsafety problem and so are marked `unsafe` (at least until
-//! the standard library has a solution).
-//!
-//! The APIs that need the `scoped` functionality are still available
-//! only nightly, with the `simple_parallel/unstable` feature.
-//!
 //! # Usage
 //!
 //! This is [available on
@@ -67,7 +42,7 @@
 //!
 //! ```toml
 //! [dependencies]
-//! simple_parallel = "0.2"
+//! simple_parallel = "0.3"
 //! ```
 //!
 //! The latest development version can be obtained [on
@@ -78,7 +53,7 @@
 //! Initialise an array, in parallel.
 //!
 //! ```rust
-//! # #[cfg(feature = "unstable")] fn foo() {
+//! # fn foo() {
 //! let mut data = [0; 10];
 //! // fill the array, with one thread for each element:
 //! simple_parallel::for_(data.iter_mut().enumerate(), |(i, elem)| {
@@ -97,28 +72,31 @@
 //! input order, unlike `unordered_map`),
 //!
 //! ```rust
-//! #[cfg(feature = "unstable")] fn foo() {
+//! extern crate crossbeam;
+//! extern crate simple_parallel;
+//!
 //! use std::collections::BTreeMap;
 //!
 //! let mut map = BTreeMap::new();
 //! map.insert('a', 1);
 //! map.insert('x', 55);
 //!
-//! // (`IntoIterator` is used, so "direct" iteration like this is fine.)
-//! let par_iter = simple_parallel::map(&map, |(&c, &elem)| {
-//!     let mut x = elem  * c as i32;
-//!     // ... something complicated and expensive ...
-//!     return x as f64
+//! crossbeam::scope(|scope| {
+//!     // (`IntoIterator` is used, so "direct" iteration like this is fine.)
+//!     let par_iter = simple_parallel::map(scope, &map, |(&c, &elem)| {
+//!         let mut x = elem  * c as i32;
+//!         // ... something complicated and expensive ...
+//!         return x as f64
+//!     });
+//!
+//!     // the computation is executing on several threads in the
+//!     // background, so that elements are hopefully ready as soon as
+//!     // possible.
+//!
+//!     for value in par_iter {
+//!         println!("I computed {}", value);
+//!     }
 //! });
-//!
-//! // the computation is executing on several threads in the
-//! // background, so that elements are hopefully ready as soon as
-//! // possible.
-//!
-//! for value in par_iter {
-//!     println!("I computed {}", value);
-//! }
-//! # }
 //! ```
 //!
 //! Sum an arbitrarily long slice, in parallel, by summing subsections and adding
@@ -131,7 +109,6 @@
 //! // limit the spew of thread spawning to something sensible
 //! const NUM_CHUNKS: usize = 8;
 //!
-//! # #[cfg(feature = "unstable")]
 //! fn sum(x: &[f64]) -> f64 {
 //!     // (round up)
 //!     let elements_per_chunk = (x.len() + NUM_CHUNKS - 1) / NUM_CHUNKS;
@@ -179,7 +156,6 @@
 //! point is `both` naturally running things in parallel.)
 //!
 //! ```rust
-//! # #[cfg(feature = "unstable")] fn foo() {
 //! /// Merges the two sorted runs `left` and `right`.
 //! /// That is, after `merge(left, right)`,
 //! ///
@@ -201,7 +177,6 @@
 //!    // now combine the two sorted halves
 //!    merge(left, right)
 //! }
-//! # }
 //! ```
 //!
 //! The [`examples`

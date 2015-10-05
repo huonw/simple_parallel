@@ -26,7 +26,7 @@ impl<T> Eq for Packet<T> {}
 
 
 /// A parallel-mapping iterator that doesn't care about the order in
-/// which elements come out.
+/// which elements come out. Constructed by calling `unordered_map`.
 pub struct UnorderedParMap<T: Send> {
     rx: Receiver<Packet<T>>,
     _guards: Vec<ScopedJoinHandle<()>>
@@ -89,7 +89,7 @@ pub fn unordered_map<'a, I: IntoIterator, F, T>(scope: &Scope<'a>, iter: I, f: F
     }
 }
 
-/// A parallel-mapping iterator.
+/// A parallel-mapping iterator. Constructed by calling `map`.
 pub struct ParMap<T:  Send> {
     unordered: UnorderedParMap<T>,
     looking_for: usize,
