@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="generator" content="rustdoc">
+    <meta name="description" content="API documentation for the Rust `Pool` struct in crate `simple_parallel`.">
+    <meta name="keywords" content="rust, rustlang, rust-lang, Pool">
+
+    <title>simple_parallel::pool::Pool - Rust</title>
+
+    <link rel="stylesheet" type="text/css" href="../../main.css">
+
+    
+    
+</head>
+<body class="rustdoc">
+    <!--[if lte IE 8]>
+    <div class="warning">
+        This old browser is unsupported and will most likely display funky
+        things.
+    </div>
+    <![endif]-->
+
+    
+
+    <section class="sidebar">
+        
+        <p class='location'><a href='../index.html'>simple_parallel</a>::<wbr><a href='index.html'>pool</a></p><script>window.sidebarCurrent = {name: 'Pool', ty: 'struct', relpath: ''};</script><script defer src="sidebar-items.js"></script>
+    </section>
+
+    <nav class="sub">
+        <form class="search-form js-only">
+            <div class="search-container">
+                <input class="search-input" name="search"
+                       autocomplete="off"
+                       placeholder="Click or press ‘S’ to search, ‘?’ for more options…"
+                       type="search">
+            </div>
+        </form>
+    </nav>
+
+    <section id='main' class="content struct">
+<h1 class='fqn'><span class='in-band'>Struct <a href='../index.html'>simple_parallel</a>::<wbr><a href='index.html'>pool</a>::<wbr><a class='struct' href=''>Pool</a></span><span class='out-of-band'><span id='render-detail'>
+            <a id="toggle-all-docs" href="javascript:void(0)" title="collapse all docs">
+                [<span class='inner'>&#x2212;</span>]
+            </a>
+        </span><a id='src-551' class='srclink' href='../../src/simple_parallel/pool.rs.html#81-85' title='goto source code'>[src]</a></span></h1>
+<pre class='rust struct'>pub struct Pool {
+    // some fields omitted
+}</pre><div class='docblock'><p>A thread pool.</p>
+
+<p>This pool allows one to spawn several threads in one go, and then
+execute any number of &quot;short-lifetime&quot; jobs on those threads,
+without having to pay the thread spawning cost, or risk exhausting
+system resources.</p>
+
+<p>The pool currently consists of some number of worker threads
+(dynamic, chosen at creation time) along with a single supervisor
+thread. The synchronisation overhead is currently very large.</p>
+
+<h1 id="&quot;short-lifetime&quot;?" class='section-header'><a
+                           href="#&quot;short-lifetime&quot;?">&quot;Short-lifetime&quot;?</a></h1>
+<p>Jobs submitted to this pool can have any lifetime at all, that is,
+the closures passed in (and elements of iterators used, etc.) can
+have borrows pointing into arbitrary stack frames, even stack
+frames that don&#39;t outlive the pool itself. This differs to
+something like
+<a href="https://crates.io/crates/scoped_threadpool"><code>scoped_threadpool</code></a>,
+where the jobs must outlive the pool.</p>
+
+<p>This extra flexibility is achieved with careful unsafe code, by
+exposing an API that is a generalised version of
+<a href="https://github.com/aturon/crossbeam"><code>crossbeam</code></a> <code>Scope::spawn</code>
+and the old <code>std::thread::scoped</code>: at the lowest-level a submitted
+job returns a <code>JobHandle</code> token that ensures that job is finished
+before any data the job might reference is invalidated
+(i.e. manages the lifetimes). Higher-level functions will usually
+wrap or otherwise hide the handle.</p>
+
+<p>However, this comes at a cost: for easy of implementation <code>Pool</code>
+currently only exposes &quot;batch&quot; jobs like <code>for_</code> and <code>map</code> and
+these jobs take control of the whole pool. That is, one cannot
+easily incrementally submit arbitrary closures to execute on this
+thread pool, which is functionality that <code>threadpool::ScopedPool</code>
+offers.</p>
+
+<h1 id="example" class='section-header'><a
+                           href="#example">Example</a></h1><pre class='rust rust-example-rendered'>
+<span class='kw'>extern</span> <span class='kw'>crate</span> <span class='ident'>crossbeam</span>;
+<span class='kw'>extern</span> <span class='kw'>crate</span> <span class='ident'>simple_parallel</span>;
+<span class='kw'>use</span> <span class='ident'>simple_parallel</span>::<span class='ident'>Pool</span>;
+
+<span class='comment'>// a function that takes some arbitrary pool and uses the pool to</span>
+<span class='comment'>// manipulate data in its own stack frame.</span>
+<span class='kw'>fn</span> <span class='ident'>do_work</span>(<span class='ident'>pool</span>: <span class='kw-2'>&amp;</span><span class='kw-2'>mut</span> <span class='ident'>Pool</span>) {
+    <span class='kw'>let</span> <span class='kw-2'>mut</span> <span class='ident'>v</span> <span class='op'>=</span> [<span class='number'>0</span>; <span class='number'>8</span>];
+    <span class='comment'>// set each element, in parallel</span>
+    <span class='ident'>pool</span>.<span class='ident'>for_</span>(<span class='kw-2'>&amp;</span><span class='kw-2'>mut</span> <span class='ident'>v</span>, <span class='op'>|</span><span class='ident'>element</span><span class='op'>|</span> <span class='op'>*</span><span class='ident'>element</span> <span class='op'>=</span> <span class='number'>3</span>);
+
+    <span class='kw'>let</span> <span class='ident'>w</span> <span class='op'>=</span> [<span class='number'>2</span>, <span class='number'>0</span>, <span class='number'>1</span>, <span class='number'>5</span>, <span class='number'>0</span>, <span class='number'>3</span>, <span class='number'>0</span>, <span class='number'>3</span>];
+
+    <span class='comment'>// add the two arrays, in parallel</span>
+    <span class='kw'>let</span> <span class='ident'>z</span>: <span class='ident'>Vec</span><span class='op'>&lt;</span>_<span class='op'>&gt;</span> <span class='op'>=</span> <span class='ident'>crossbeam</span>::<span class='ident'>scope</span>(<span class='op'>|</span><span class='ident'>scope</span><span class='op'>|</span> {
+        <span class='ident'>pool</span>.<span class='ident'>map</span>(<span class='ident'>scope</span>, <span class='ident'>v</span>.<span class='ident'>iter</span>().<span class='ident'>zip</span>(<span class='ident'>w</span>.<span class='ident'>iter</span>()), <span class='op'>|</span>(<span class='ident'>x</span>, <span class='ident'>y</span>)<span class='op'>|</span> <span class='op'>*</span><span class='ident'>x</span> <span class='op'>+</span> <span class='op'>*</span><span class='ident'>y</span>).<span class='ident'>collect</span>()
+    });
+
+    <span class='macro'>assert_eq</span><span class='macro'>!</span>(<span class='ident'>z</span>, <span class='kw-2'>&amp;</span>[<span class='number'>5</span>, <span class='number'>3</span>, <span class='number'>4</span>, <span class='number'>8</span>, <span class='number'>3</span>, <span class='number'>6</span>, <span class='number'>3</span>, <span class='number'>6</span>]);
+}
+
+<span class='kw'>let</span> <span class='kw-2'>mut</span> <span class='ident'>pool</span> <span class='op'>=</span> <span class='ident'>Pool</span>::<span class='ident'>new</span>(<span class='number'>4</span>);
+<span class='ident'>do_work</span>(<span class='kw-2'>&amp;</span><span class='kw-2'>mut</span> <span class='ident'>pool</span>);</pre>
+</div><h2 id='methods'>Methods</h2><h3 class='impl'><code>impl <a class='struct' href='../../simple_parallel/pool/struct.Pool.html' title='simple_parallel::pool::Pool'>Pool</a></code></h3><div class='impl-items'><h4 id='method.new' class='method'><code>fn <a href='#method.new' class='fnname'>new</a>(n_threads: <a href='http://doc.rust-lang.org/nightly/std/primitive.usize.html'>usize</a>) -&gt; <a class='struct' href='../../simple_parallel/pool/struct.Pool.html' title='simple_parallel::pool::Pool'>Pool</a></code></h4>
+<div class='docblock'><p>Create a new thread pool with <code>n_threads</code> worker threads.</p>
+</div><h4 id='method.for_' class='method'><code>fn <a href='#method.for_' class='fnname'>for_</a>&lt;Iter: <a class='trait' href='http://doc.rust-lang.org/nightly/core/iter/trait.IntoIterator.html' title='core::iter::IntoIterator'>IntoIterator</a>, F&gt;(&amp;mut self, iter: Iter, f: F) <span class='where'>where Iter::Item: <a class='trait' href='http://doc.rust-lang.org/nightly/core/marker/trait.Send.html' title='core::marker::Send'>Send</a>, Iter: <a class='trait' href='http://doc.rust-lang.org/nightly/core/marker/trait.Send.html' title='core::marker::Send'>Send</a>, F: <a class='trait' href='http://doc.rust-lang.org/nightly/core/ops/trait.Fn.html' title='core::ops::Fn'>Fn</a>(Iter::Item) + <a class='trait' href='http://doc.rust-lang.org/nightly/core/marker/trait.Sync.html' title='core::marker::Sync'>Sync</a></span></code></h4>
+<div class='docblock'><p>Execute <code>f</code> on each element of <code>iter</code>.</p>
+
+<p>This panics if <code>f</code> panics, although the precise time and
+number of elements consumed after the element that panics is
+not specified.</p>
+
+<h1 id="examples" class='section-header'><a
+                           href="#examples">Examples</a></h1><pre class='rust rust-example-rendered'>
+<span class='kw'>use</span> <span class='ident'>simple_parallel</span>::<span class='ident'>Pool</span>;
+
+<span class='kw'>let</span> <span class='kw-2'>mut</span> <span class='ident'>pool</span> <span class='op'>=</span> <span class='ident'>Pool</span>::<span class='ident'>new</span>(<span class='number'>4</span>);
+
+<span class='kw'>let</span> <span class='kw-2'>mut</span> <span class='ident'>v</span> <span class='op'>=</span> [<span class='number'>0</span>; <span class='number'>8</span>];
+
+<span class='comment'>// set each element, in parallel</span>
+<span class='ident'>pool</span>.<span class='ident'>for_</span>(<span class='kw-2'>&amp;</span><span class='kw-2'>mut</span> <span class='ident'>v</span>, <span class='op'>|</span><span class='ident'>element</span><span class='op'>|</span> <span class='op'>*</span><span class='ident'>element</span> <span class='op'>=</span> <span class='number'>3</span>);
+
+<span class='macro'>assert_eq</span><span class='macro'>!</span>(<span class='ident'>v</span>, [<span class='number'>3</span>; <span class='number'>8</span>]);</pre>
+</div><h4 id='method.unordered_map' class='method'><code>fn <a href='#method.unordered_map' class='fnname'>unordered_map</a>&lt;'pool, 'a, I: <a class='trait' href='http://doc.rust-lang.org/nightly/core/iter/trait.IntoIterator.html' title='core::iter::IntoIterator'>IntoIterator</a>, F, T&gt;(&amp;'pool mut self, scope: &amp;<a class='struct' href='../../crossbeam/scoped/struct.Scope.html' title='crossbeam::scoped::Scope'>Scope</a>&lt;'a&gt;, iter: I, f: F) -&gt; <a class='struct' href='../../simple_parallel/pool/struct.UnorderedParMap.html' title='simple_parallel::pool::UnorderedParMap'>UnorderedParMap</a>&lt;'pool, 'a, T&gt; <span class='where'>where I: 'a + <a class='trait' href='http://doc.rust-lang.org/nightly/core/marker/trait.Send.html' title='core::marker::Send'>Send</a>, I::Item: <a class='trait' href='http://doc.rust-lang.org/nightly/core/marker/trait.Send.html' title='core::marker::Send'>Send</a> + 'a, F: 'a + <a class='trait' href='http://doc.rust-lang.org/nightly/core/marker/trait.Sync.html' title='core::marker::Sync'>Sync</a> + <a class='trait' href='http://doc.rust-lang.org/nightly/core/marker/trait.Send.html' title='core::marker::Send'>Send</a> + <a class='trait' href='http://doc.rust-lang.org/nightly/core/ops/trait.Fn.html' title='core::ops::Fn'>Fn</a>(I::Item) -&gt; T, T: <a class='trait' href='http://doc.rust-lang.org/nightly/core/marker/trait.Send.html' title='core::marker::Send'>Send</a> + 'a</span></code></h4>
+<div class='docblock'><p>Execute <code>f</code> on each element in <code>iter</code> in parallel across the
+pool&#39;s threads, with unspecified yield order.</p>
+
+<p>This behaves like <code>map</code>, but does not make efforts to ensure
+that the elements are returned in the order of <code>iter</code>, hence
+this is cheaper.</p>
+
+<p>The iterator yields <code>(uint, T)</code> tuples, where the <code>uint</code> is
+the index of the element in the original iterator.</p>
+
+<h1 id="examples" class='section-header'><a
+                           href="#examples">Examples</a></h1><pre class='rust rust-example-rendered'>
+<span class='kw'>extern</span> <span class='kw'>crate</span> <span class='ident'>crossbeam</span>;
+<span class='kw'>extern</span> <span class='kw'>crate</span> <span class='ident'>simple_parallel</span>;
+<span class='kw'>use</span> <span class='ident'>simple_parallel</span>::<span class='ident'>Pool</span>;
+
+<span class='kw'>let</span> <span class='kw-2'>mut</span> <span class='ident'>pool</span> <span class='op'>=</span> <span class='ident'>Pool</span>::<span class='ident'>new</span>(<span class='number'>4</span>);
+
+<span class='comment'>// adjust each element in parallel, and iterate over them as</span>
+<span class='comment'>// they are generated (or as close to that as possible)</span>
+<span class='ident'>crossbeam</span>::<span class='ident'>scope</span>(<span class='op'>|</span><span class='ident'>scope</span><span class='op'>|</span> {
+    <span class='kw'>for</span> (<span class='ident'>index</span>, <span class='ident'>output</span>) <span class='kw'>in</span> <span class='ident'>pool</span>.<span class='ident'>unordered_map</span>(<span class='ident'>scope</span>, <span class='number'>0</span>..<span class='number'>8</span>, <span class='op'>|</span><span class='ident'>i</span><span class='op'>|</span> <span class='ident'>i</span> <span class='op'>+</span> <span class='number'>10</span>) {
+        <span class='comment'>// each element is exactly 10 more than its original index</span>
+        <span class='macro'>assert_eq</span><span class='macro'>!</span>(<span class='ident'>output</span>, <span class='ident'>index</span> <span class='kw'>as</span> <span class='ident'>i32</span> <span class='op'>+</span> <span class='number'>10</span>);
+    }
+})</pre>
+</div><h4 id='method.map' class='method'><code>fn <a href='#method.map' class='fnname'>map</a>&lt;'pool, 'a, I: <a class='trait' href='http://doc.rust-lang.org/nightly/core/iter/trait.IntoIterator.html' title='core::iter::IntoIterator'>IntoIterator</a>, F, T&gt;(&amp;'pool mut self, scope: &amp;<a class='struct' href='../../crossbeam/scoped/struct.Scope.html' title='crossbeam::scoped::Scope'>Scope</a>&lt;'a&gt;, iter: I, f: F) -&gt; <a class='struct' href='../../simple_parallel/pool/struct.ParMap.html' title='simple_parallel::pool::ParMap'>ParMap</a>&lt;'pool, 'a, T&gt; <span class='where'>where I: 'a + <a class='trait' href='http://doc.rust-lang.org/nightly/core/marker/trait.Send.html' title='core::marker::Send'>Send</a>, I::Item: <a class='trait' href='http://doc.rust-lang.org/nightly/core/marker/trait.Send.html' title='core::marker::Send'>Send</a> + 'a, F: 'a + <a class='trait' href='http://doc.rust-lang.org/nightly/core/marker/trait.Send.html' title='core::marker::Send'>Send</a> + <a class='trait' href='http://doc.rust-lang.org/nightly/core/marker/trait.Sync.html' title='core::marker::Sync'>Sync</a> + <a class='trait' href='http://doc.rust-lang.org/nightly/core/ops/trait.Fn.html' title='core::ops::Fn'>Fn</a>(I::Item) -&gt; T, T: <a class='trait' href='http://doc.rust-lang.org/nightly/core/marker/trait.Send.html' title='core::marker::Send'>Send</a> + 'a</span></code></h4>
+<div class='docblock'><p>Execute <code>f</code> on <code>iter</code> in parallel across the pool&#39;s threads,
+returning an iterator that yields the results in the order of
+the elements of <code>iter</code> to which they correspond.</p>
+
+<p>This is a drop-in replacement for <code>iter.map(f)</code>, that runs in
+parallel, and consumes <code>iter</code> as the pool&#39;s threads complete
+their previous tasks.</p>
+
+<p>See <code>unordered_map</code> if the output order is unimportant.</p>
+
+<h1 id="examples" class='section-header'><a
+                           href="#examples">Examples</a></h1><pre class='rust rust-example-rendered'>
+<span class='kw'>extern</span> <span class='kw'>crate</span> <span class='ident'>crossbeam</span>;
+<span class='kw'>extern</span> <span class='kw'>crate</span> <span class='ident'>simple_parallel</span>;
+<span class='kw'>use</span> <span class='ident'>simple_parallel</span>::<span class='ident'>Pool</span>;
+
+<span class='kw'>let</span> <span class='kw-2'>mut</span> <span class='ident'>pool</span> <span class='op'>=</span> <span class='ident'>Pool</span>::<span class='ident'>new</span>(<span class='number'>4</span>);
+
+<span class='comment'>// create a vector by adjusting 0..8, in parallel</span>
+<span class='kw'>let</span> <span class='ident'>elements</span>: <span class='ident'>Vec</span><span class='op'>&lt;</span>_<span class='op'>&gt;</span> <span class='op'>=</span> <span class='ident'>crossbeam</span>::<span class='ident'>scope</span>(<span class='op'>|</span><span class='ident'>scope</span><span class='op'>|</span> {
+    <span class='ident'>pool</span>.<span class='ident'>map</span>(<span class='ident'>scope</span>, <span class='number'>0</span>..<span class='number'>8</span>, <span class='op'>|</span><span class='ident'>i</span><span class='op'>|</span> <span class='ident'>i</span> <span class='op'>+</span> <span class='number'>10</span>).<span class='ident'>collect</span>()
+});
+
+<span class='macro'>assert_eq</span><span class='macro'>!</span>(<span class='ident'>elements</span>, <span class='kw-2'>&amp;</span>[<span class='number'>10</span>, <span class='number'>11</span>, <span class='number'>12</span>, <span class='number'>13</span>, <span class='number'>14</span>, <span class='number'>15</span>, <span class='number'>16</span>, <span class='number'>17</span>]);</pre>
+</div></div><h3 class='impl'><code>impl <a class='struct' href='../../simple_parallel/pool/struct.Pool.html' title='simple_parallel::pool::Pool'>Pool</a></code></h3><div class='docblock'><p>Low-level/internal functionality.</p>
+</div><div class='impl-items'><h4 id='method.execute' class='method'><code>unsafe fn <a href='#method.execute' class='fnname'>execute</a>&lt;'pool, 'f, A, GenFn, WorkerFn, MainFn&gt;(&amp;'pool mut self, scope: &amp;<a class='struct' href='../../crossbeam/scoped/struct.Scope.html' title='crossbeam::scoped::Scope'>Scope</a>&lt;'f&gt;, data: A, gen_fn: GenFn, main_fn: MainFn) -&gt; <a class='struct' href='../../simple_parallel/pool/struct.JobHandle.html' title='simple_parallel::pool::JobHandle'>JobHandle</a>&lt;'pool, 'f&gt; <span class='where'>where A: 'f + <a class='trait' href='http://doc.rust-lang.org/nightly/core/marker/trait.Send.html' title='core::marker::Send'>Send</a>, GenFn: 'f + <a class='trait' href='http://doc.rust-lang.org/nightly/core/ops/trait.FnMut.html' title='core::ops::FnMut'>FnMut</a>(&amp;mut A) -&gt; WorkerFn + <a class='trait' href='http://doc.rust-lang.org/nightly/core/marker/trait.Send.html' title='core::marker::Send'>Send</a>, WorkerFn: 'f + <a class='trait' href='http://doc.rust-lang.org/nightly/core/ops/trait.FnMut.html' title='core::ops::FnMut'>FnMut</a>(WorkerId) + <a class='trait' href='http://doc.rust-lang.org/nightly/core/marker/trait.Send.html' title='core::marker::Send'>Send</a>, MainFn: 'f + <a class='trait' href='http://doc.rust-lang.org/nightly/core/ops/trait.FnOnce.html' title='core::ops::FnOnce'>FnOnce</a>(A) + <a class='trait' href='http://doc.rust-lang.org/nightly/core/marker/trait.Send.html' title='core::marker::Send'>Send</a></span></code></h4>
+<div class='docblock'><p>Run a job on the thread pool.</p>
+
+<p><code>gen_fn</code> is called <code>self.n_threads</code> times to create the
+functions to execute on the worker threads. Each of these is
+immediately called exactly once on a worker thread (that is,
+they are semantically <code>FnOnce</code>), and <code>main_fn</code> is also called,
+on the supervisor thread. It is expected that the workers and
+<code>main_fn</code> will manage any internal coordination required to
+distribute chunks of work.</p>
+
+<p>The job must take pains to ensure <code>main_fn</code> doesn&#39;t quit
+before the workers do.</p>
+</div></div><h2 id='implementations'>Trait Implementations</h2><h3 class='impl'><code>impl <a class='trait' href='http://doc.rust-lang.org/nightly/core/ops/trait.Drop.html' title='core::ops::Drop'>Drop</a> for <a class='struct' href='../../simple_parallel/pool/struct.Pool.html' title='simple_parallel::pool::Pool'>Pool</a></code></h3><div class='impl-items'><h4 id='method.drop' class='method'><code>fn <a href='http://doc.rust-lang.org/nightly/core/ops/trait.Drop.html#method.drop' class='fnname'>drop</a>(&amp;mut self)</code></h4>
+</div></section>
+    <section id='search' class="content hidden"></section>
+
+    <section class="footer"></section>
+
+    <div id="help" class="hidden">
+        <div>
+            <div class="shortcuts">
+                <h1>Keyboard Shortcuts</h1>
+
+                <dl>
+                    <dt>?</dt>
+                    <dd>Show this help dialog</dd>
+                    <dt>S</dt>
+                    <dd>Focus the search field</dd>
+                    <dt>&larrb;</dt>
+                    <dd>Move up in search results</dd>
+                    <dt>&rarrb;</dt>
+                    <dd>Move down in search results</dd>
+                    <dt>&#9166;</dt>
+                    <dd>Go to active search result</dd>
+                </dl>
+            </div>
+
+            <div class="infos">
+                <h1>Search Tricks</h1>
+
+                <p>
+                    Prefix searches with a type followed by a colon (e.g.
+                    <code>fn:</code>) to restrict the search to a given type.
+                </p>
+
+                <p>
+                    Accepted types are: <code>fn</code>, <code>mod</code>,
+                    <code>struct</code>, <code>enum</code>,
+                    <code>trait</code>, <code>typedef</code> (or
+                    <code>tdef</code>).
+                </p>
+
+                <p>
+                    Search functions by type signature (e.g.
+                    <code>vec -> usize</code>)
+                </p>
+            </div>
+        </div>
+    </div>
+
+    
+
+    <script>
+        window.rootPath = "../../";
+        window.currentCrate = "simple_parallel";
+        window.playgroundUrl = "";
+    </script>
+    <script src="../../jquery.js"></script>
+    <script src="../../main.js"></script>
+    
+    <script async src="../../search-index.js"></script>
+</body>
+</html>

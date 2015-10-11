@@ -1,0 +1,1 @@
+initSidebarItems({"fn":[["scope",""]],"struct":[["Scope",""],["ScopedJoinHandle",""]]});

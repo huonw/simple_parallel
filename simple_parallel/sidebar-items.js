@@ -1,0 +1,1 @@
+initSidebarItems({"fn":[["both","Execute `f` on both `x` and `y`, in parallel, returning the result."],["for_","Execute `f` on each element of `iter`, in their own `scoped` thread."]],"mod":[["one_to_one",""],["pool",""]]});
