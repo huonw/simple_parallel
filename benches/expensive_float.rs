@@ -1,6 +1,7 @@
 #![cfg(feature = "unstable")]
 #![feature(test)]
 extern crate test;
+extern crate crossbeam;
 extern crate simple_parallel;
 
 fn expensive(x: u64) -> f64 {
@@ -23,15 +24,17 @@ fn naive(b: &mut test::Bencher) {
 #[bench]
 fn pool(b: &mut test::Bencher) {
     let mut pool = simple_parallel::Pool::new(4);
-    let f = expensive;
     b.iter(|| {
-        unsafe {pool.map(0..TOP, &f).collect::<Vec<_>>()}
+        crossbeam::scope(|scope| {
+            pool.map(scope, 0..TOP, expensive).collect::<Vec<_>>()
+        })
     })
 }
 #[bench]
 fn nopool(b: &mut test::Bencher) {
-    let f = expensive;
     b.iter(|| {
-        simple_parallel::map(0..TOP, &f).collect::<Vec<_>>()
+        crossbeam::scope(|scope| {
+            simple_parallel::map(scope, 0..TOP, expensive).collect::<Vec<_>>()
+        })
     })
 }
