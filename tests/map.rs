@@ -1,8 +1,19 @@
-#![feature(iter_order)]
 extern crate simple_parallel;
 extern crate crossbeam;
 
 use std::sync::Mutex;
+
+fn eq<I, J>(mut x: I, mut y: J) -> bool
+    where I: Iterator, J: Iterator<Item = I::Item>, I::Item: PartialEq
+{
+    loop {
+        match (x.next(), y.next()) {
+            (None, None) => return true,
+            (Some(ref x), Some(ref y)) if x == y => continue,
+            _ => return false
+        }
+    }
+}
 
 // with this many elements, its (hopefully) likely that the
 // threads won't execute sequentially.
@@ -17,7 +28,7 @@ fn unordered_map_probabilistic_out_of_ordering() {
         // see if there are any elements where the order they come out of
         // the original iterator is different to the order in which they
         // are yielded here.
-        assert!(iter.enumerate().any(|(yield_order, (true_order, ()))| yield_order != true_order));
+        assert!(!eq(iter.map(|t| t.0), 0..N));
     });
 }
 
@@ -26,7 +37,7 @@ fn map_in_order() {
     crossbeam::scope(|scope| {
         let iter = simple_parallel::map(scope, 0..N, |i| i);
 
-        assert!(iter.enumerate().all(|(yield_order, true_order)| yield_order == true_order));
+        assert!(eq(iter, 0..N));
     });
 }
 
@@ -66,9 +77,7 @@ fn pool_unordered() {
         // see if there are any elements where the order they come out of
         // the original iterator is different to the order in which they
         // are yielded here.
-        let v: Vec<_> = iter.enumerate().collect();
-        assert_eq!(v.len(), N);
-        assert!(v.into_iter().any(|(yield_order, (true_order, ()))| yield_order != true_order));
+        assert!(!eq(iter.map(|t| t.0), 0..N));
     });
 }
 
@@ -79,7 +88,7 @@ fn pool_map_in_order() {
 
         let iter = pool.map(scope, 0..N, |i| i);
 
-        assert!(iter.eq(0..N));
+        assert!(eq(iter, 0..N));
     });
 }
 
