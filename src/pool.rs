@@ -5,6 +5,7 @@ use std::sync::{mpsc, atomic, Mutex, Arc};
 use std::thread;
 use fnbox::FnBox;
 
+use crossbeam::sync::MsQueue;
 use crossbeam::{self, Scope};
 
 type JobInner<'b> =  Box<for<'a> FnBox<&'a [mpsc::Sender<Work>]> + Send + 'b>;
@@ -318,13 +319,13 @@ impl Pool {
     pub fn unordered_map<'pool, 'a, I: IntoIterator, F, T>(&'pool mut self, scope: &Scope<'a>, iter: I, f: F)
         -> UnorderedParMap<'pool, 'a, T>
         where I: 'a + Send,
-              I::Item: Send + 'a,
+              I::Item: Send + Sync + 'a,
               F: 'a + Sync + Send + Fn(I::Item) -> T,
               T: Send + 'a
     {
         let nthreads = self.n_threads;
         let (needwork_tx, needwork_rx) = mpsc::channel();
-        let (work_tx, work_rx) = mpsc::channel();
+        let work = MsQueue::new();
         struct Shared<Chan, Atom, F> {
             work: Chan,
             sent: Atom,
@@ -332,7 +333,7 @@ impl Pool {
             func: F,
         }
         let shared = Arc::new(Shared {
-            work: Mutex::new(work_rx),
+            work: work,
             sent: atomic::AtomicUsize::new(0),
             finished: atomic::AtomicUsize::new(0),
             func: f,
@@ -352,10 +353,7 @@ impl Pool {
                              move |_id| {
                                  let needwork = needwork_tx.take().unwrap();
                                  loop {
-                                     let data =  {
-                                         let guard = shared.work.lock().unwrap();
-                                         guard.recv()
-                                     };
+                                     let data = shared.work.pop();
                                      match data {
                                          Ok(Some((idx, elem))) => {
                                              let data = (shared.func)(elem);
@@ -371,6 +369,7 @@ impl Pool {
                                              }
                                          }
                                          Ok(None) | Err(_) => {
+                                             shared.work.push(Err(()));
                                              break
                                          }
                                      };
@@ -402,7 +401,7 @@ impl Pool {
                                      //
                                      // Downside: work will be
                                      // distributed chunkier.
-                                     let _ = work_tx.send(iter.next());
+                                     shared.work.push(Ok(iter.next()));
                                  }
                              };
 
@@ -420,8 +419,9 @@ impl Pool {
                                          // the Err arm above)
                                          let _ = send_data(BUFFER_FACTOR * nthreads);
                                      }
-                                 }
+                                 };
                              }
+                             shared.work.push(Err(()));
                          })
         };
         UnorderedParMap {
@@ -461,7 +461,7 @@ impl Pool {
     pub fn map<'pool, 'a, I: IntoIterator, F, T>(&'pool mut self, scope: &Scope<'a>, iter: I, f: F)
         -> ParMap<'pool, 'a, T>
         where I: 'a + Send,
-              I::Item: Send + 'a,
+              I::Item: Send + Sync + 'a,
               F: 'a + Send + Sync + Fn(I::Item) -> T,
               T: Send + 'a
     {
