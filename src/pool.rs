@@ -84,7 +84,7 @@ pub struct Pool {
     n_threads: usize,
 }
 #[derive(Copy, Clone)]
-struct WorkerId { n: usize }
+pub struct WorkerId { n: usize }
 
 type WorkInner<'a> = &'a mut (FnMut(WorkerId) + Send + 'a);
 struct Work {
