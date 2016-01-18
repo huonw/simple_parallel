@@ -22,9 +22,9 @@ fn probabilistic_out_of_ordering() {
 
 #[test]
 fn pool() {
-    let mut pool = simple_parallel::Pool::new(8);
+    let mut pool = simple_parallel::Pool::new(2);
 
-    let mut index = (0..N).map(|_| 0usize).collect::<Vec<_>>();
+    let mut index = vec![0; N];
 
     static ORDER: AtomicUsize = ATOMIC_USIZE_INIT;
     ORDER.store(0, Ordering::SeqCst);

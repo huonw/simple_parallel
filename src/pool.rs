@@ -153,6 +153,16 @@ impl<'a> Drop for PanicCanary<'a> {
         }
     }
 }
+
+#[derive(Debug)]
+enum WorkMsg {
+    Blocked(usize),
+    Progress,
+    Finished,
+}
+const INITIAL_FACTOR: usize = 32;
+const CHUNK_ELEMS: usize = 1;
+
 impl Pool {
     /// Create a new thread pool with `n_threads` worker threads.
     pub fn new(n_threads: usize) -> Pool {
@@ -231,21 +241,13 @@ impl Pool {
     /// assert_eq!(v, [3; 8]);
     /// ```
     pub fn for_<Iter: IntoIterator, F>(&mut self, iter: Iter, ref f: F)
-        where Iter::Item: Send,
-              Iter: Send,
+        where Iter::Item: Send + Sync,
               F: Fn(Iter::Item) + Sync
-
     {
+        let nthreads = self.n_threads;
         let (needwork_tx, needwork_rx) = mpsc::channel();
-        let mut work_txs = Vec::with_capacity(self.n_threads);
-        let mut work_rxs = Vec::with_capacity(self.n_threads);
-        for _ in 0..self.n_threads {
-            let (t, r) = mpsc::channel();
-            work_txs.push(t);
-            work_rxs.push(r);
-        }
-
-        let mut work_rxs = work_rxs.into_iter();
+        let (done_tx, done_rx) = mpsc::channel();
+        let work = MsQueue::new();
 
         crossbeam::scope(|scope| unsafe {
             let handle = self.execute(
@@ -253,35 +255,62 @@ impl Pool {
                 needwork_tx,
                 |needwork_tx| {
                     let mut needwork_tx = Some(needwork_tx.clone());
-                    let mut work_rx = Some(work_rxs.next().unwrap());
+                    let work = &work;
                     move |id| {
-                        let work_rx = work_rx.take().unwrap();
                         let needwork = needwork_tx.take().unwrap();
                         loop {
-                            needwork.send(id).unwrap();
-                            match work_rx.recv() {
-                                Ok(Some(elem)) => {
+                            let data = match work.try_pop() {
+                                Some(x) => x,
+                                None => {
+                                    let _ = needwork.send(id);
+                                    work.pop()
+                                }
+                            };
+
+                            match data {
+                                Some(elem) => {
                                     f(elem);
                                 }
-                                Ok(None) | Err(_) => break
+                                None => {
+                                    work.push(None);
+                                    break
+                                }
                             }
                         }
                     }
                 },
                 move |needwork_tx| {
-                    let mut iter = iter.into_iter().fuse();
                     drop(needwork_tx);
-                    loop {
-                        match needwork_rx.recv() {
-                            // closed, done!
-                            Err(_) => break,
-                            Ok(id) => {
-                                work_txs[id.n].send(iter.next()).unwrap();
-                            }
-                        }
-                    }
+                    let _ = done_rx.recv();
                 });
 
+            // run this on the main thread so that the iterator
+            // doesn't have to be Send, but note that the main
+            // function shouldn't execute before this.
+            let mut iter = iter.into_iter().fuse();
+            let mut send_data = |n: usize| {
+                let mut count = 0;
+                for x in iter.by_ref().take(nthreads * n) {
+                    count += 1;
+                    work.push(Some(x))
+                }
+                if count < n * nthreads {
+                    work.push(None)
+                }
+            };
+
+            send_data(INITIAL_FACTOR);
+
+            loop {
+                match needwork_rx.recv() {
+                    // closed, done!
+                    Err(_) => break,
+                    Ok(_id) => {
+                        send_data(INITIAL_FACTOR)
+                    }
+                }
+            }
+            let _ = done_tx.send(());
             handle.wait();
         })
     }
@@ -334,17 +363,9 @@ impl Pool {
             work: work,
             func: f,
         });
-        #[derive(Debug)]
-        enum WorkMsg {
-            Blocked(usize),
-            Progress,
-            Finished,
-        }
 
         let (tx, rx) = mpsc::channel();
 
-        const INITIAL_FACTOR: usize = 32;
-        const CHUNK_ELEMS: usize = 1;
         assert!(INITIAL_FACTOR % CHUNK_ELEMS == 0);
 
         let handle = unsafe {
@@ -434,7 +455,6 @@ impl Pool {
                                  }
                                  send_data(amount)
                              }
-//                             println!("{}", amount / INITIAL_FACTOR);
                              shared.work.push(Err(()));
                          })
         };
