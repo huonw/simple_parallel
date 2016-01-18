@@ -326,23 +326,26 @@ impl Pool {
         let nthreads = self.n_threads;
         let (needwork_tx, needwork_rx) = mpsc::channel();
         let work = MsQueue::new();
-        struct Shared<Chan, Atom, F> {
+        struct Shared<Chan, F> {
             work: Chan,
-            sent: Atom,
-            finished: Atom,
             func: F,
         }
         let shared = Arc::new(Shared {
             work: work,
-            sent: atomic::AtomicUsize::new(0),
-            finished: atomic::AtomicUsize::new(0),
             func: f,
         });
+        #[derive(Debug)]
+        enum WorkMsg {
+            Blocked(usize),
+            Progress,
+            Finished,
+        }
 
         let (tx, rx) = mpsc::channel();
 
-        const INITIAL_FACTOR: usize = 4;
-        const BUFFER_FACTOR: usize = INITIAL_FACTOR / 2;
+        const INITIAL_FACTOR: usize = 32;
+        const CHUNK_ELEMS: usize = 1;
+        assert!(INITIAL_FACTOR % CHUNK_ELEMS == 0);
 
         let handle = unsafe {
             self.execute(scope, (needwork_tx, shared),
@@ -352,36 +355,44 @@ impl Pool {
                              let shared = shared.clone();
                              move |_id| {
                                  let needwork = needwork_tx.take().unwrap();
+                                 let mut last_idx = 0;
+                                 let mut count = 0;
                                  loop {
-                                     let data = shared.work.pop();
+                                     let data = match shared.work.try_pop() {
+                                         Some(d) => d,
+                                         None => {
+                                             let _ = needwork.send(WorkMsg::Blocked(last_idx));
+                                             shared.work.pop()
+                                         }
+                                     };
                                      match data {
-                                         Ok(Some((idx, elem))) => {
-                                             let data = (shared.func)(elem);
-                                             let status = tx.send(Packet {
-                                                 idx: idx, data: data
-                                             });
-                                             // the user disconnected,
-                                             // so there's no point
-                                             // computing more.
-                                             if status.is_err() {
-                                                 let _ = needwork.send(true);
-                                                 break
+                                         Ok((sent_size, vals)) => {
+                                             for (idx, elem) in vals {
+                                                 count += 1;
+                                                 let data = (shared.func)(elem);
+                                                 let status = tx.send(Packet {
+                                                     idx: idx, data: data
+                                                 });
+                                                 last_idx = idx;
+                                                 // the user disconnected,
+                                                 // so there's no point
+                                                 // computing more.
+                                                 if status.is_err() {
+                                                     let _ = needwork.send(WorkMsg::Finished);
+                                                     break
+                                                 }
+                                             }
+
+                                             if count > INITIAL_FACTOR {
+                                                 let _ = needwork.send(WorkMsg::Progress);
+                                                 count = 0;
                                              }
                                          }
-                                         Ok(None) | Err(_) => {
+                                         Err(_) => {
                                              shared.work.push(Err(()));
                                              break
                                          }
                                      };
-                                     let old =
-                                         shared.finished.fetch_add(1, atomic::Ordering::SeqCst);
-                                     let sent = shared.sent.load(atomic::Ordering::SeqCst);
-
-                                     if old + BUFFER_FACTOR * nthreads == sent {
-                                         if needwork.send(false).is_err() {
-                                             break
-                                         }
-                                     }
                                  }
                              }
                          },
@@ -390,37 +401,40 @@ impl Pool {
                              drop(needwork_tx);
 
                              let mut send_data = |n: usize| {
-                                 shared.sent.fetch_add(n, atomic::Ordering::SeqCst);
+                                 for _ in 0..nthreads * n / CHUNK_ELEMS {
+                                     let x: Vec<_> = iter.by_ref().take(CHUNK_ELEMS).collect();
+                                     let len = x.len();
+                                     shared.work.push(Ok((n, x)));
 
-                                 for _ in 0..n {
-                                     // TODO: maybe this could instead send
-                                     // several elements at a time, to
-                                     // reduce the number of
-                                     // allocations/atomic operations
-                                     // performed.
-                                     //
-                                     // Downside: work will be
-                                     // distributed chunkier.
-                                     shared.work.push(Ok(iter.next()));
+                                     if len < CHUNK_ELEMS {
+                                         shared.work.push(Err(()));
+                                         break
+                                     }
                                  }
                              };
 
 
-                             send_data(INITIAL_FACTOR * nthreads);
+                             let mut amount = INITIAL_FACTOR;
+                             send_data(amount);
+                             let mut last_mul = 0;
 
                              loop {
-                                 match needwork_rx.recv() {
+                                 let data = needwork_rx.recv();
+                                 match data {
                                      // closed, done!
-                                     Ok(true) | Err(_) => break,
-                                     Ok(false) => {
-                                         // ignore return, because we
-                                         // need to wait until the
-                                         // workers have exited (i.e,
-                                         // the Err arm above)
-                                         let _ = send_data(BUFFER_FACTOR * nthreads);
+                                     Ok(WorkMsg::Finished) | Err(_) => break,
+                                     Ok(WorkMsg::Progress) => (),
+                                     Ok(WorkMsg::Blocked(idx)) => {
+                                         let chunk = idx / INITIAL_FACTOR;
+                                         if chunk > last_mul {
+                                             amount *= 2;
+                                             last_mul = chunk;
+                                         }
                                      }
-                                 };
+                                 }
+                                 send_data(amount)
                              }
+//                             println!("{}", amount / INITIAL_FACTOR);
                              shared.work.push(Err(()));
                          })
         };
@@ -487,6 +501,7 @@ impl Pool {
     ///
     /// The job must take pains to ensure `main_fn` doesn't quit
     /// before the workers do.
+    #[inline(never)]
     pub unsafe fn execute<'pool, 'f, A, GenFn, WorkerFn, MainFn>(
         &'pool mut self, scope: &Scope<'f>, data: A, gen_fn: GenFn, main_fn: MainFn) -> JobHandle<'pool, 'f>
 
