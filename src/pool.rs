@@ -29,12 +29,9 @@ struct Job {
 /// Jobs submitted to this pool can have any lifetime at all, that is,
 /// the closures passed in (and elements of iterators used, etc.) can
 /// have borrows pointing into arbitrary stack frames, even stack
-/// frames that don't outlive the pool itself. This differs to
-/// something like
-/// [`scoped_threadpool`](https://crates.io/crates/scoped_threadpool),
-/// where the jobs must outlive the pool.
+/// frames that don't outlive the pool itself.
 ///
-/// This extra flexibility is achieved with careful unsafe code, by
+/// This flexibility is achieved with careful unsafe code, by
 /// exposing an API that is a generalised version of
 /// [`crossbeam`](https://github.com/aturon/crossbeam) `Scope::spawn`
 /// and the old `std::thread::scoped`: at the lowest-level a submitted
@@ -387,7 +384,7 @@ impl Pool {
                                          }
                                      };
                                      match data {
-                                         Ok((sent_size, vals)) => {
+                                         Ok((_sent_size, vals)) => {
                                              for (idx, elem) in vals {
                                                  count += 1;
                                                  let data = (shared.func)(elem);

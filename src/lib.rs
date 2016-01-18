@@ -15,24 +15,9 @@
 //! sequentially, it will also take down the main thread (eventually)
 //! when run using the functions in this library.
 //!
-//! On the point of performance and robustness, the top level
-//! functions do no thread pooling and so everything essentially
-//! spawns a new thread for each element, which is definitely
-//! suboptimal for many reasons. Fortunately, not all is lost, the
-//! functionality is designed to be as generic as possible, so the
-//! iterator functions work with many many iterators, e.g. instead of
-//! executing a thread on every element of a vector individually, a
-//! user can divide that vector into disjoint sections and spread
-//! those across much fewer threads (e.g. [the `chunks`
-//! method](http://doc.rust-lang.org/nightly/std/slice/trait.SliceExt.html#tymethod.chunks)).
-//!
-//! Further, the thread pooling that does exist has a lot of
-//! synchronisation overhead, and so is actually rarely a performance
-//! improvement (although it is a robustness improvement over the
-//! top-level functions, since it limits the number of threads that
-//! will be spawned).
-//!
-//! Either way, **this is not recommended for general use**.
+//! This library is mainly designed as an API example rather than a
+//! high-performance and robust piece of code, and so **this is not
+//! recommended for general use**.
 //!
 //! # Usage
 //!
@@ -55,14 +40,14 @@
 //! ```rust
 //! # fn foo() {
 //! let mut data = [0; 10];
-//! // fill the array, with one thread for each element:
+//! // fill the array (uses a threadpool internally)
 //! simple_parallel::for_(data.iter_mut().enumerate(), |(i, elem)| {
 //!     *elem = i as i32;
 //! });
 //! # }
 //!
 //! # let mut data = [0; 10];
-//! // now adjust that data, with a threadpool:
+//! // now adjust that data, with a custom threadpool:
 //! let mut pool = simple_parallel::Pool::new(4);
 //! pool.for_(data.iter_mut(), |elem| *elem *= 2);
 //! ```
