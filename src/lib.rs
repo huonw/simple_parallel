@@ -185,6 +185,7 @@
 //! Fourier transform implementation (it really works, and the
 //! parallelism does buy something... when tuned).
 
+extern crate num_cpus;
 extern crate crossbeam;
 
 mod maps;
@@ -207,14 +208,10 @@ pub use pool::Pool;
 /// If `f` panics, so does `for_`. If this occurs, the number of
 /// elements of `iter` that have had `f` called on them is
 /// unspecified.
-pub fn for_<I: IntoIterator, F>(iter: I, ref f: F)
-    where I::Item: Send, F: Fn(I::Item) + Sync
+pub fn for_<I: IntoIterator, F>(iter: I, f: F)
+    where I::Item: Send + Sync, F: Fn(I::Item) + Sync
 {
-    crossbeam::scope(|scope| {
-        for elem in iter {
-            scope.spawn(move || f(elem));
-        }
-    });
+    Pool::new(num_cpus::get()).for_(iter, f)
 }
 
 /// Execute `f` on both `x` and `y`, in parallel, returning the
