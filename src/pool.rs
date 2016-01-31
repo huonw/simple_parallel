@@ -148,7 +148,7 @@ struct PanicCanary<'a> {
 impl<'a> Drop for PanicCanary<'a> {
     fn drop(&mut self) {
         if thread::panicking() {
-            self.flag.store(true, atomic::Ordering::SeqCst)
+            self.flag.store(true, atomic::Ordering::Release)
         }
     }
 }
@@ -188,7 +188,7 @@ impl Pool {
                 match rx.recv() {
                     Ok((Some(job), finished_tx)) => {
                         (job.func).call_box(&txs);
-                        let job_panicked = panicked.load(atomic::Ordering::SeqCst);
+                        let job_panicked = panicked.load(atomic::Ordering::Acquire);
                         let msg = if job_panicked { Err(()) } else { Ok(()) };
                         finished_tx.send(msg).unwrap();
                         if job_panicked { break }
@@ -375,8 +375,8 @@ impl Pool {
                                          }
                                      };
                                      let old =
-                                         shared.finished.fetch_add(1, atomic::Ordering::SeqCst);
-                                     let sent = shared.sent.load(atomic::Ordering::SeqCst);
+                                         shared.finished.fetch_add(1, atomic::Ordering::AcqRel);
+                                     let sent = shared.sent.load(atomic::Ordering::Acquire);
 
                                      if old + BUFFER_FACTOR * nthreads == sent {
                                          if needwork.send(false).is_err() {
@@ -391,7 +391,7 @@ impl Pool {
                              drop(needwork_tx);
 
                              let mut send_data = |n: usize| {
-                                 shared.sent.fetch_add(n, atomic::Ordering::SeqCst);
+                                 shared.sent.fetch_add(n, atomic::Ordering::AcqRel);
 
                                  for _ in 0..n {
                                      // TODO: maybe this could instead send
