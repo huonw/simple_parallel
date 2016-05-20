@@ -21,7 +21,7 @@ strided = "*"
 num = "*"
 num_cpus = "0.2"
 [dependencies]
-crossbeam = "0.1"
+crossbeam = "0.2"
 
 [features]
 unstable = []
