@@ -109,9 +109,14 @@ pub struct JobHandle<'pool, 'f> {
 
 impl JobStatus {
     fn wait(&mut self) {
+        use std::sync::atomic;
+        static X: atomic::AtomicUsize = atomic::ATOMIC_USIZE_INIT;
         if self.wait {
             self.wait = false;
+            let x = X.fetch_add(1, atomic::Ordering::Relaxed);
+            println!("waiting... {}", x);
             self.job_finished.recv().unwrap().unwrap();
+            println!("waited {}", x)
         }
     }
 }
@@ -135,9 +140,14 @@ impl<'pool, 'f> Drop for JobHandle<'pool, 'f> {
 
 impl Drop for Pool {
     fn drop(&mut self) {
+        use std::sync::atomic;
         let (tx, rx) = mpsc::channel();
         self.job_queue.send((None, tx)).unwrap();
+        static X: atomic::AtomicUsize = atomic::ATOMIC_USIZE_INIT;
+        let x = X.fetch_add(1, atomic::Ordering::Relaxed);
+        println!("pool waiting... {}", x);
         rx.recv().unwrap().unwrap();
+        println!("pool waited {}", x);
     }
 }
 struct PanicCanary<'a> {
@@ -166,6 +176,10 @@ impl Pool {
         let (tx, rx) = mpsc::channel::<(Option<Job>, mpsc::Sender<Result<(), ()>>)>();
 
         thread::spawn(move || {
+            use std::sync::atomic;
+            static X: atomic::AtomicUsize = atomic::ATOMIC_USIZE_INIT;
+            let x = X.fetch_add(1, atomic::Ordering::Relaxed);
+            println!("pool starting... {}", x);
             let panicked = Arc::new(atomic::AtomicBool::new(false));
 
             let mut _guards = Vec::with_capacity(n_threads);
@@ -192,22 +206,31 @@ impl Pool {
                 }))
             }
 
-            loop {
-                match rx.recv() {
+            for i in 0.. {
+                println!("pool tick {} {}", x, i);
+                let data = rx.recv();
+                println!("pool tick got data {} {}", x, i);
+                match data {
                     Ok((Some(job), finished_tx)) => {
                         (job.func).call_box(&txs);
                         let job_panicked = panicked.load(atomic::Ordering::SeqCst);
                         let msg = if job_panicked { Err(()) } else { Ok(()) };
+                        println!("sending finished {} {}", x, i);
                         finished_tx.send(msg).unwrap();
+                        println!("sent finished {} {}", x, i);
                         if job_panicked { break }
                     }
                     Ok((None, finished_tx)) => {
+                        println!("sending all finished {} {}", x, i);
                         finished_tx.send(Ok(())).unwrap();
+                        println!("sent all finished {} {}", x, i);
                         break
                     }
                     Err(_) => break,
                 }
+                println!("pool end tick {} {}", x, i);
             }
+            println!("pool exiting {}", x)
         });
 
         Pool {
