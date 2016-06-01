@@ -487,7 +487,7 @@ impl Pool {
     ///
     /// The job must take pains to ensure `main_fn` doesn't quit
     /// before the workers do.
-    pub unsafe fn execute<'pool, 'f, A, GenFn, WorkerFn, MainFn>(
+    unsafe fn execute<'pool, 'f, A, GenFn, WorkerFn, MainFn>(
         &'pool mut self, scope: &Scope<'f>, data: A, gen_fn: GenFn, main_fn: MainFn) -> JobHandle<'pool, 'f>
 
         where A: 'f + Send,
